@@ -1,3 +1,4 @@
+
 <script>
 /* =========================================================
    CLIENT_OUTWARD - MATERIAL LIST EDIT + DELETE + WAREHOUSE
@@ -125,7 +126,9 @@ function stockSel(cur, exp) {
 function getTxnId(row) { return String((row && row['Transaction_ID']) || '').trim(); }
 
 function getOutwardGroupKey(row) {
-  return getTxnId(row) || ('ROW_' + String((row && row.rowNumber) || ''));
+  var txnId = getTxnId(row);
+  var headPerson = String((row && row['Head_Person']) || '').trim();
+  return (txnId + '|' + headPerson) || ('ROW_' + String((row && row.rowNumber) || ''));
 }
 
 function outSafeId(value) {
@@ -247,7 +250,7 @@ function loadOutwardData(options) {
     .withFailureHandler(function(error) {
       if (!silent) {
         outShowLoading(false);
-        alert('Outward data loading error: ' + ((error && error.message) || error));
+        Swal.fire('Error', 'Outward data loading error: ' + ((error && error.message) || error), 'error');
       } else {
         console.warn('Outward auto refresh failed:', (error && error.message) || error);
       }
@@ -418,15 +421,28 @@ function getFilteredOutwardRows() {
   return requests.filter(function(row) {
     var status = getOutwardStatus(row);
     var isReturn = isReturnRow(row);
+    var tab = window.outwardActiveTab;
 
-    if (window.outwardActiveTab === 'return' && !isReturn) return false;
-    if (window.outwardActiveTab !== 'return' && isReturn) return false;
-    if (window.outwardActiveTab === 'pending' && status !== 'PENDING') return false;
-    if (window.outwardActiveTab === 'success' && status !== 'SUCCESS') return false;
-    if (window.outwardActiveTab === 'partial' && status !== 'PARTIAL') return false;
+    // Return タブ：RETURN 行のみ表示
+    if (tab === 'return' && !isReturn) return false;
+    if (tab !== 'return' && isReturn) return false;
+
+    // Pending タブ：PENDING のみ表示
+    if (tab === 'pending' && status !== 'PENDING') return false;
+
+    // Success タブ：SUCCESS のみ表示（PENDING/PARTIAL は非表示）
+    if (tab === 'success' && status !== 'SUCCESS') return false;
+
+    // Partial タブ：PARTIAL のみ表示
+    if (tab === 'partial' && status !== 'PARTIAL') return false;
+
+    // Issue From フィルタ
     if (issueFrom && String(row['Issue From'] || '').trim() !== issueFrom) return false;
+
+    // 検索ボックスが空ならここで終了
     if (!search) return true;
 
+    // 検索条件
     var haystack = [
       row['Transaction_ID'], row['System_Key'], row['Type'], row['Date'], row['Location'], row['Purpose'],
       row['Head_Person'], row['Technician'], row['Asset_Reason'], row['Linked_Req_ID'], row['Goods_Type'], row['GOODS TYPE'],
@@ -437,7 +453,6 @@ function getFilteredOutwardRows() {
     return haystack.indexOf(search) !== -1;
   });
 }
-
 /* ---------------- Stats ---------------- */
 function renderOutwardStats() {
   var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
@@ -639,7 +654,7 @@ function ensureOutwardGroupEditModal() {
       '<div class="out-modal-actions">' +
         '<button type="button" class="btn btn-outline" data-action="refresh-outward-master">Refresh Material List</button>' +
         '<button type="button" class="btn btn-outline" data-action="close-outward-group">Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-action="save-outward-group">Save All Items</button>' +
+        '<button type="button" class="btn btn-primary" data-action="save-outward-group" id="saveOutwardGroupBtn">Save All Items</button>'+
       '</div>' +
     '</div>';
 
@@ -676,10 +691,22 @@ function openOutwardGroupEdit(transactionId, keepModal) {
   ensureOutwardGroupEditModal();
   var key = String(transactionId || '');
   var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
-  var items = requests.filter(function(row) { return getOutwardGroupKey(row) === key; });
+
+  var items = requests.filter(function(row) {
+    // 同じグループのアイテムかどうか
+    var groupMatch = getOutwardGroupKey(row) === key;
+    if (!groupMatch) return false;
+
+    // Pending タブから開いた場合は SUCCESS を除外
+    if (window.outwardActiveTab === 'pending' && getOutwardStatus(row) === 'SUCCESS') {
+      return false;
+    }
+
+    return true;
+  });
 
   if (!items.length) {
-    alert('Transaction items not found.\nTransaction ID: ' + key + '\nPlease refresh and try again.');
+    Swal.fire('Not Found', 'Transaction items not found.\nTransaction ID: ' + key + '\nPlease refresh and try again.', 'warning');
     return;
   }
 
@@ -964,7 +991,18 @@ function closeOutwardGroupEditModal() {
 function saveOutwardGroupEdit() {
   var txnId = outGetValue('outGroupTransactionId');
   var rows = document.querySelectorAll('#outGroupEditBody tr');
-  if (!txnId || !rows.length) return alert('No items to update');
+  if (!txnId || !rows.length) {
+    Swal.fire('Error', 'No items to update', 'error');
+    return;
+  }
+
+  // 1. Save button ko disable karo aur loading dikhao
+  var saveBtn = outEl('saveOutwardGroupBtn');
+  var originalText = saveBtn ? saveBtn.innerHTML : 'Save All Items';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving...'; // Agar Font Awesome hai
+  }
 
   var items = [];
   var invalid = null;
@@ -1014,36 +1052,97 @@ function saveOutwardGroupEdit() {
     });
   });
 
-  if (invalid) return alert(invalid);
-  if (deleteCount && deleteCount === rows.length) {
-    var allOk = confirm('Is transaction ke sabhi items delete ho jayenge. Continue?');
-    if (!allOk) return;
-  } else if (deleteCount) {
-    var ok = confirm(deleteCount + ' item delete mark hai. Save karne par sheet se delete ho jayega. Continue?');
-    if (!ok) return;
+  if (invalid) {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = originalText;
+    }
+    Swal.fire('Validation Error', invalid, 'error');
+    return;
   }
 
-  if (!window.google || !google.script || !google.script.run) return alert('Apps Script connection not available');
+  if (deleteCount && deleteCount === rows.length) {
+    Swal.fire({
+      title: 'Delete All Items?',
+      text: 'Is transaction ke sabhi items delete ho jayenge.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Delete',
+      cancelButtonText: 'Cancel'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        proceedSaveOutwardGroupEdit(txnId, items, saveBtn, originalText);
+      } else {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = originalText;
+        }
+      }
+    });
+    return;
+  } else if (deleteCount) {
+    Swal.fire({
+      title: 'Delete ' + deleteCount + ' Item(s)?',
+      text: deleteCount + ' item delete mark hai. Save karne par sheet se delete ho jayega.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Delete',
+      cancelButtonText: 'Cancel'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        proceedSaveOutwardGroupEdit(txnId, items, saveBtn, originalText);
+      } else {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = originalText;
+        }
+      }
+    });
+    return;
+  }
+
+  proceedSaveOutwardGroupEdit(txnId, items, saveBtn, originalText);
+}
+
+function proceedSaveOutwardGroupEdit(txnId, items, saveBtn, originalText) {
+  if (!window.google || !google.script || !google.script.run) {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = originalText;
+    }
+    Swal.fire('Error', 'Apps Script connection not available', 'error');
+    return;
+  }
 
   outShowLoading(true);
   google.script.run
     .withSuccessHandler(function(response) {
       outShowLoading(false);
-      alert((response && response.message) || 'Transaction updated');
-      closeOutwardGroupEditModal();
-      window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
-      setOutwardMasterData((response && (response.masterData || response.materialRows)) || window.outwardMasterData || []);
-      ensureOutwardExtraTabs();
-      renderOutwardStats();
-      renderOutwardTable();
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+      }
+
+      Swal.fire('Success', (response && response.message) || 'Transaction items updated successfully.', 'success')
+        .then(() => {
+          closeOutwardGroupEditModal();
+          window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
+          setOutwardMasterData((response && (response.masterData || response.materialRows)) || window.outwardMasterData || []);
+          ensureOutwardExtraTabs();
+          renderOutwardStats();
+          renderOutwardTable();
+        });
     })
     .withFailureHandler(function(error) {
       outShowLoading(false);
-      alert('Group update failed: ' + ((error && error.message) || error));
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+      }
+      Swal.fire('Error', 'Group update failed: ' + ((error && error.message) || error), 'error');
     })
     .updateOutwardGroupIssue({ transactionId: txnId, items: items });
 }
-
 /* ---------------- Single row edit compatibility ---------------- */
 function openOutwardEdit(rowNumber) {
   var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];

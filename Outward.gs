@@ -143,8 +143,8 @@ function updateOutwardGroupIssue(payload) {
   payload = payload || {};
   if (!payload.items || !payload.items.length) throw new Error('No transaction items received');
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+ const lock = LockService.getScriptLock();
+lock.waitLock(5000); // 5 seconds max
 
   try {
     const sheet = getOutwardSheet_();
