@@ -1,0 +1,1420 @@
+<script>
+/* =========================================================
+   CLIENT_INWARD.html - FULL FIXED + FILTERS + COLLAPSIBLE FORM
+   Paste this complete file in Apps Script: Client_Inward.html
+   Works with your existing Index.html inward form/table/modal IDs.
+========================================================= */
+
+(function inwardBootstrap() {
+  try {
+    if (typeof inwardMasterData === 'undefined') window.inwardMasterData = [];
+    if (typeof inwardRecentEntries === 'undefined') window.inwardRecentEntries = [];
+    if (typeof inwardSuggestions === 'undefined') window.inwardSuggestions = { vendors: [], locations: [] };
+    if (typeof inwardLoaded === 'undefined') window.inwardLoaded = false;
+  } catch (e) {
+    window.inwardMasterData = window.inwardMasterData || [];
+    window.inwardRecentEntries = window.inwardRecentEntries || [];
+    window.inwardSuggestions = window.inwardSuggestions || { vendors: [], locations: [] };
+    window.inwardLoaded = false;
+  }
+
+  if (typeof window.inwardFormCollapsed === 'undefined') {
+    window.inwardFormCollapsed = false;
+  }
+})();
+
+/* ---------------- Safe helpers ---------------- */
+function inEl(id) {
+  return document.getElementById(id);
+}
+
+function inGetMasterRows() {
+  try {
+    if (Array.isArray(inwardMasterData)) return inwardMasterData;
+  } catch (e) {}
+  return Array.isArray(window.inwardMasterData) ? window.inwardMasterData : [];
+}
+
+function inGetRecentRows() {
+  try {
+    if (Array.isArray(inwardRecentEntries)) return inwardRecentEntries;
+  } catch (e) {}
+  return Array.isArray(window.inwardRecentEntries) ? window.inwardRecentEntries : [];
+}
+
+function inSetMasterRows(rows) {
+  rows = Array.isArray(rows) ? rows : [];
+  try { inwardMasterData = rows; } catch (e) {}
+  window.inwardMasterData = rows;
+}
+
+function inSetRecentRows(rows) {
+  rows = Array.isArray(rows) ? rows : [];
+  try { inwardRecentEntries = rows; } catch (e) {}
+  window.inwardRecentEntries = rows;
+}
+
+function inSetSuggestions(obj) {
+  obj = obj || { vendors: [], locations: [] };
+  try { inwardSuggestions = obj; } catch (e) {}
+  window.inwardSuggestions = obj;
+}
+
+function inSetLoaded(value) {
+  try { inwardLoaded = !!value; } catch (e) {}
+  window.inwardLoaded = !!value;
+}
+
+function inGetSuggestions() {
+  try {
+    if (inwardSuggestions) return inwardSuggestions;
+  } catch (e) {}
+  return window.inwardSuggestions || { vendors: [], locations: [] };
+}
+
+function inGetValue(id) {
+  if (typeof getValue === 'function') {
+    try { return getValue(id); } catch (e) {}
+  }
+  var el = inEl(id);
+  return el ? String(el.value || '').trim() : '';
+}
+
+function inSetValue(id, value) {
+  if (typeof setValue === 'function') {
+    try { setValue(id, value); return; } catch (e) {}
+  }
+  var el = inEl(id);
+  if (el) el.value = value === null || value === undefined ? '' : String(value);
+}
+
+function inSetText(id, value) {
+  if (typeof setText === 'function') {
+    try { setText(id, value); return; } catch (e) {}
+  }
+  var el = inEl(id);
+  if (el) el.textContent = value === null || value === undefined ? '' : String(value);
+}
+
+function inEsc(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof esc === 'function') {
+    try { return esc(value); } catch (e) {}
+  }
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function inEscAttr(value) {
+  return inEsc(value).replace(/`/g, '&#096;');
+}
+
+function inNorm(value) {
+  if (typeof norm === 'function') {
+    try { return norm(value); } catch (e) {}
+  }
+  return String(value || '').trim().toLowerCase();
+}
+
+function inUnique(arr) {
+  var seen = {};
+  var out = [];
+  (arr || []).forEach(function(v) {
+    var s = String(v === null || v === undefined ? '' : v).replace(/\s+/g, ' ').trim();
+    if (!s) return;
+    var key = s.toUpperCase();
+    if (!seen[key]) {
+      seen[key] = true;
+      out.push(s);
+    }
+  });
+  return out.sort(function(a, b) { return a.localeCompare(b); });
+}
+
+function inFillDatalist(id, values) {
+  var list = inEl(id);
+  if (!list) return;
+  list.innerHTML = '';
+  inUnique(values || []).forEach(function(value) {
+    var option = document.createElement('option');
+    option.value = value;
+    list.appendChild(option);
+  });
+}
+
+function inShowLoading(show) {
+  if (typeof showLoading === 'function') {
+    try { showLoading(show); return; } catch (e) {}
+  }
+}
+
+function inToInputDate(value) {
+  if (typeof toInputDate === 'function') {
+    try {
+      var existing = toInputDate(value);
+      if (existing) return existing;
+    } catch (e) {}
+  }
+
+  if (!value) return '';
+
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    var yyyy = value.getFullYear();
+    var mm = String(value.getMonth() + 1).padStart(2, '0');
+    var dd = String(value.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
+  var s = String(value).trim();
+  if (!s) return '';
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+
+  var m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (m) {
+    var d1 = Number(m[1]);
+    var d2 = Number(m[2]);
+    var y = m[3].length === 2 ? '20' + m[3] : m[3];
+    var dd2 = String(d1).padStart(2, '0');
+    var mm2 = String(d2).padStart(2, '0');
+    return y + '-' + mm2 + '-' + dd2;
+  }
+
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function inDateKey(value) {
+  return inToInputDate(value);
+}
+
+function inGetMasterField(row, field) {
+  row = row || {};
+  var map = {
+    goodsType: ['goodsType', 'GOODS TYPE', 'Goods Type'],
+    mainGroup: ['mainGroup', 'MAIN GROUP', 'Main Group'],
+    subGroup: ['subGroup', 'SUB GROUP', 'Sub Group'],
+    brand: ['brand', 'BRAND', 'Brand'],
+    goodsDescription: ['goodsDescription', 'itemName', 'GOODS DESCRIPTION', 'ITEM NAME', 'Goods Description', 'Item Name'],
+    uom: ['uom', 'UOM'],
+    model: ['model', 'MODEL', 'Model']
+  };
+  var keys = map[field] || [field];
+  for (var i = 0; i < keys.length; i++) {
+    if (row[keys[i]] !== undefined && row[keys[i]] !== null) return row[keys[i]];
+  }
+  return '';
+}
+
+function inGetEntryField(row, key) {
+  row = row || {};
+  return row[key] === null || row[key] === undefined ? '' : row[key];
+}
+
+function inGetDeliveryChallanValue(row) {
+  var v = inGetEntryField(row, 'DELIVERY CHALLAN');
+  if (v !== '') return v;
+  return inGetEntryField(row, 'DELIVERY CHALLAN/INVOICE NO');
+}
+
+function inGetInvoiceNoValue(row) {
+  var v = inGetEntryField(row, 'INVOICE NO');
+  if (v !== '') return v;
+  return '';
+}
+
+/* ---------------- CSS and UI shell patch ---------------- */
+function installInwardEnhancementStyles() {
+  if (inEl('inwardEnhancementStyle')) return;
+
+  var style = document.createElement('style');
+  style.id = 'inwardEnhancementStyle';
+  style.textContent = [
+    '#inwardModule .inward-collapsed .form-body { display:none !important; }',
+    '#inwardFormToggleBtn { margin-left:auto; }',
+    '#inwardFilterBar { padding:14px 18px; border-bottom:1px solid var(--border,#e5e7eb); background:#fff; display:grid; grid-template-columns: repeat(6, minmax(145px,1fr)); gap:10px; align-items:end; }',
+    '#inwardFilterBar .filter-field label { display:block; font-size:11px; font-weight:800; margin-bottom:5px; color:#334155; }',
+    '#inwardFilterBar input, #inwardFilterBar select { width:100%; min-height:38px; padding:8px 10px; font-size:12px; border-radius:8px; }',
+    '#inwardFilterBar .filter-actions { display:flex; gap:8px; align-items:center; }',
+    '#inwardFilterBar .filter-actions .btn { min-height:38px; padding:8px 11px; }',
+    '#inwardModule .inward-filter-title { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }',
+    '#inwardModule .inward-filter-hint { font-size:11px; color:#64748b; }',
+    '.in-edit-autocomplete-menu { position:fixed; z-index:999999; background:#fff; border:1px solid #cbd5e1; border-radius:10px; box-shadow:0 16px 38px rgba(15,23,42,0.22); max-height:260px; overflow:auto; padding:6px; display:none; }',
+    '.in-edit-autocomplete-item { padding:9px 10px; border-radius:8px; cursor:pointer; font-size:13px; color:#0f172a; white-space:normal; line-height:1.25; }',
+    '.in-edit-autocomplete-item:hover, .in-edit-autocomplete-item.active { background:#eff6ff; color:#1d4ed8; font-weight:800; }',
+    '.in-edit-autocomplete-empty { padding:10px; color:#64748b; font-size:12px; }',
+    '#inwardEditModal.modal-bg { align-items:center !important; justify-content:center !important; }',
+    '#inwardEditModal .modal { display:block !important; }',
+    '#inwardModule .table-wrap { position:relative; }',
+    '#inwardModule table th:last-child, #inwardModule table td:last-child { position:sticky; right:0; z-index:4; background:#fff; box-shadow:-6px 0 14px rgba(15,23,42,0.08); }',
+    '#inwardModule table thead th:last-child { background:#f8fafc; z-index:6; }',
+    '@media (max-width: 1300px) { #inwardFilterBar { grid-template-columns: repeat(4, minmax(145px,1fr)); } }',
+    '@media (max-width: 900px) { #inwardFilterBar { grid-template-columns: repeat(2, minmax(130px,1fr)); } }',
+    '@media (max-width: 600px) { #inwardFilterBar { grid-template-columns: 1fr; } #inwardFilterBar .filter-actions { flex-direction:column; align-items:stretch; } }'
+  ].join('\n');
+
+  document.head.appendChild(style);
+}
+
+function installInwardUIEnhancements() {
+  installInwardEnhancementStyles();
+  installInwardFormCollapse();
+  installInwardInvoiceFields();
+  installInwardFilters();
+  ensureInwardEditModal();
+}
+
+function installInwardFormCollapse() {
+  var inwardModule = inEl('inwardModule');
+  if (!inwardModule) return;
+
+  var panels = inwardModule.querySelectorAll('.panel');
+  if (!panels || !panels.length) return;
+
+  var formPanel = null;
+  for (var i = 0; i < panels.length; i++) {
+    var title = panels[i].querySelector('.panel-header h3');
+    if (title && String(title.textContent || '').toLowerCase().indexOf('inward entry form') !== -1) {
+      formPanel = panels[i];
+      break;
+    }
+  }
+  if (!formPanel) formPanel = panels[0];
+
+  var header = formPanel.querySelector('.panel-header');
+  if (!header || inEl('inwardFormToggleBtn')) return;
+
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'inwardFormToggleBtn';
+  btn.className = 'btn btn-outline btn-sm';
+  btn.onclick = toggleInwardEntryForm;
+  header.appendChild(btn);
+
+  var saved = '';
+  try { saved = localStorage.getItem('erp_inward_form_collapsed') || ''; } catch (e) {}
+  window.inwardFormCollapsed = saved === 'yes';
+  applyInwardFormCollapsedState();
+}
+
+function toggleInwardEntryForm() {
+  window.inwardFormCollapsed = !window.inwardFormCollapsed;
+  try { localStorage.setItem('erp_inward_form_collapsed', window.inwardFormCollapsed ? 'yes' : 'no'); } catch (e) {}
+  applyInwardFormCollapsedState();
+}
+
+function applyInwardFormCollapsedState() {
+  var inwardModule = inEl('inwardModule');
+  if (!inwardModule) return;
+
+  var panels = inwardModule.querySelectorAll('.panel');
+  var formPanel = null;
+  for (var i = 0; i < panels.length; i++) {
+    var title = panels[i].querySelector('.panel-header h3');
+    if (title && String(title.textContent || '').toLowerCase().indexOf('inward entry form') !== -1) {
+      formPanel = panels[i];
+      break;
+    }
+  }
+  if (!formPanel) formPanel = panels[0];
+
+  if (formPanel) {
+    if (window.inwardFormCollapsed) formPanel.classList.add('inward-collapsed');
+    else formPanel.classList.remove('inward-collapsed');
+  }
+
+  var btn = inEl('inwardFormToggleBtn');
+  if (btn) btn.textContent = window.inwardFormCollapsed ? 'Expand Form' : 'Collapse Form';
+}
+
+
+/* ---------------- Delivery Challan / Invoice No separate UI patch ---------------- */
+function installInwardInvoiceFields() {
+  patchMainInwardInvoiceFields();
+  patchInwardEditInvoiceFields();
+  patchInwardTableInvoiceHeader();
+}
+
+function patchMainInwardInvoiceFields() {
+  var delivery = inEl('inDeliveryChallan');
+  if (!delivery) return;
+
+  var deliveryGroup = delivery.closest ? delivery.closest('.form-group') : null;
+  if (deliveryGroup) {
+    var label = deliveryGroup.querySelector('label');
+    if (label) label.textContent = 'Delivery Challan';
+    delivery.placeholder = 'Delivery Challan No';
+  }
+
+  if (inEl('inInvoiceNo')) return;
+
+  var invoiceGroup = document.createElement('div');
+  invoiceGroup.className = deliveryGroup ? deliveryGroup.className : 'form-group span-2';
+  invoiceGroup.innerHTML = '<label>Invoice No</label><input type="text" id="inInvoiceNo" placeholder="Invoice No">';
+
+  if (deliveryGroup && deliveryGroup.parentNode) {
+    deliveryGroup.parentNode.insertBefore(invoiceGroup, deliveryGroup.nextSibling);
+  }
+}
+
+function patchInwardEditInvoiceFields() {
+  var delivery = inEl('inEditDeliveryChallan');
+  if (!delivery) return;
+
+  var deliveryGroup = delivery.closest ? delivery.closest('.form-group') : null;
+  if (deliveryGroup) {
+    var label = deliveryGroup.querySelector('label');
+    if (label) label.textContent = 'Delivery Challan';
+    delivery.placeholder = 'Delivery Challan No';
+  }
+
+  if (inEl('inEditInvoiceNo')) return;
+
+  var invoiceGroup = document.createElement('div');
+  invoiceGroup.className = deliveryGroup ? deliveryGroup.className : 'form-group span-2';
+  invoiceGroup.innerHTML = '<label>Invoice No</label><input type="text" id="inEditInvoiceNo" placeholder="Invoice No">';
+
+  if (deliveryGroup && deliveryGroup.parentNode) {
+    deliveryGroup.parentNode.insertBefore(invoiceGroup, deliveryGroup.nextSibling);
+  }
+}
+
+function patchInwardTableInvoiceHeader() {
+  var table = inEl('inwardTableBody');
+  if (!table) return;
+  var headerRow = table.closest('table') ? table.closest('table').querySelector('thead tr') : null;
+  if (!headerRow || headerRow.getAttribute('data-invoice-patched') === 'yes') return;
+
+  var cells = Array.prototype.slice.call(headerRow.children);
+  for (var i = 0; i < cells.length; i++) {
+    var text = String(cells[i].textContent || '').trim().toUpperCase();
+    if (text === 'DC / INVOICE NO' || text === 'DELIVERY CHALLAN/INVOICE NO' || text === 'DELIVERY CHALLAN / INVOICE NO') {
+      cells[i].textContent = 'Delivery Challan';
+      var th = document.createElement('th');
+      th.textContent = 'Invoice No';
+      headerRow.insertBefore(th, cells[i].nextSibling);
+      headerRow.setAttribute('data-invoice-patched', 'yes');
+      return;
+    }
+  }
+}
+
+function installInwardFilters() {
+  if (inEl('inwardFilterBar')) return;
+
+  var inwardModule = inEl('inwardModule');
+  if (!inwardModule) return;
+
+  var panels = inwardModule.querySelectorAll('.panel');
+  var recentPanel = null;
+  for (var i = 0; i < panels.length; i++) {
+    var title = panels[i].querySelector('.panel-header h3');
+    if (title && String(title.textContent || '').toLowerCase().indexOf('recent inward entries') !== -1) {
+      recentPanel = panels[i];
+      break;
+    }
+  }
+  if (!recentPanel && panels.length > 1) recentPanel = panels[1];
+  if (!recentPanel) return;
+
+  var header = recentPanel.querySelector('.panel-header');
+  if (header && !header.querySelector('.inward-filter-hint')) {
+    var titleBox = header.querySelector('h3');
+    if (titleBox && !titleBox.parentElement.classList.contains('inward-filter-title')) {
+      var wrap = document.createElement('div');
+      wrap.className = 'inward-filter-title';
+      titleBox.parentNode.insertBefore(wrap, titleBox);
+      wrap.appendChild(titleBox);
+      var hint = document.createElement('span');
+      hint.className = 'inward-filter-hint';
+      hint.textContent = 'Search and filter records below';
+      wrap.appendChild(hint);
+    }
+  }
+
+  var bar = document.createElement('div');
+  bar.id = 'inwardFilterBar';
+  bar.innerHTML =
+    '<div class="filter-field"><label>From Date</label><input type="date" id="inFilterFromDate"></div>' +
+    '<div class="filter-field"><label>To Date</label><input type="date" id="inFilterToDate"></div>' +
+    '<div class="filter-field"><label>Goods Type</label><select id="inFilterGoodsType"><option value="">All Goods Type</option></select></div>' +
+    '<div class="filter-field"><label>Main Group</label><input list="inFilterMainGroupList" id="inFilterMainGroup" placeholder="Search Main Group"><datalist id="inFilterMainGroupList"></datalist></div>' +
+    '<div class="filter-field"><label>Sub Group</label><input list="inFilterSubGroupList" id="inFilterSubGroup" placeholder="Depends on Main Group"><datalist id="inFilterSubGroupList"></datalist></div>' +
+    '<div class="filter-field"><label>Brand</label><input list="inFilterBrandList" id="inFilterBrand" placeholder="Depends on Sub Group"><datalist id="inFilterBrandList"></datalist></div>' +
+    '<div class="filter-field"><label>Goods Description</label><input list="inFilterGoodsDescriptionList" id="inFilterGoodsDescription" placeholder="Search Goods Description"><datalist id="inFilterGoodsDescriptionList"></datalist></div>' +
+    '<div class="filter-field"><label>Invoice No Search</label><input type="text" id="inFilterInvoice" placeholder="Invoice no"></div>' +
+    '<div class="filter-field"><label>DC No Search</label><input type="text" id="inFilterDcNo" placeholder="DC no"></div>' +
+    '<div class="filter-field"><label>Serial No Search</label><input type="text" id="inFilterSerialNo" placeholder="Serial no"></div>' +
+    '<div class="filter-field"><label>Stock Type</label><select id="inFilterStockType"><option value="">All Stock Type</option><option value="NEW">NEW</option><option value="OLD">OLD</option><option value="REPAIRED">REPAIRED</option><option value="FAULTY">FAULTY</option><option value="SCRAP">SCRAP</option></select></div>' +
+    '<div class="filter-field filter-actions"><button type="button" class="btn btn-outline" onclick="clearInwardFilters()">Clear Filters</button><button type="button" class="btn btn-primary" onclick="loadInwardData()">Refresh</button></div>';
+
+  if (header && header.nextSibling) recentPanel.insertBefore(bar, header.nextSibling);
+  else recentPanel.appendChild(bar);
+
+  bindInwardFilterEvents();
+}
+
+function bindInwardFilterEvents() {
+  var ids = [
+    'inFilterFromDate', 'inFilterToDate', 'inFilterGoodsType',
+    'inFilterInvoice', 'inFilterDcNo', 'inFilterSerialNo', 'inFilterStockType'
+  ];
+
+  ids.forEach(function(id) {
+    var el = inEl(id);
+    if (el && !el.getAttribute('data-in-filter-bound')) {
+      el.addEventListener('input', renderInwardTable);
+      el.addEventListener('change', renderInwardTable);
+      el.setAttribute('data-in-filter-bound', 'yes');
+    }
+  });
+
+  var main = inEl('inFilterMainGroup');
+  if (main && !main.getAttribute('data-in-filter-bound')) {
+    main.addEventListener('input', onInFilterMainGroupChange);
+    main.addEventListener('change', onInFilterMainGroupChange);
+    main.setAttribute('data-in-filter-bound', 'yes');
+  }
+
+  var sub = inEl('inFilterSubGroup');
+  if (sub && !sub.getAttribute('data-in-filter-bound')) {
+    sub.addEventListener('input', onInFilterSubGroupChange);
+    sub.addEventListener('change', onInFilterSubGroupChange);
+    sub.setAttribute('data-in-filter-bound', 'yes');
+  }
+
+  var brand = inEl('inFilterBrand');
+  if (brand && !brand.getAttribute('data-in-filter-bound')) {
+    brand.addEventListener('input', onInFilterBrandChange);
+    brand.addEventListener('change', onInFilterBrandChange);
+    brand.setAttribute('data-in-filter-bound', 'yes');
+  }
+
+  var desc = inEl('inFilterGoodsDescription');
+  if (desc && !desc.getAttribute('data-in-filter-bound')) {
+    desc.addEventListener('input', renderInwardTable);
+    desc.addEventListener('change', renderInwardTable);
+    desc.setAttribute('data-in-filter-bound', 'yes');
+  }
+}
+
+function onInFilterMainGroupChange() {
+  inSetValue('inFilterSubGroup', '');
+  inSetValue('inFilterBrand', '');
+  inSetValue('inFilterGoodsDescription', '');
+  buildInwardFilterLists();
+  renderInwardTable();
+}
+
+function onInFilterSubGroupChange() {
+  inSetValue('inFilterBrand', '');
+  inSetValue('inFilterGoodsDescription', '');
+  buildInwardFilterLists();
+  renderInwardTable();
+}
+
+function onInFilterBrandChange() {
+  inSetValue('inFilterGoodsDescription', '');
+  buildInwardFilterLists();
+  renderInwardTable();
+}
+
+function clearInwardFilters() {
+  [
+    'inFilterFromDate', 'inFilterToDate', 'inFilterGoodsType', 'inFilterMainGroup',
+    'inFilterSubGroup', 'inFilterBrand', 'inFilterGoodsDescription', 'inFilterInvoice',
+    'inFilterDcNo', 'inFilterSerialNo', 'inFilterStockType'
+  ].forEach(function(id) { inSetValue(id, ''); });
+
+  buildInwardFilterLists();
+  renderInwardTable();
+}
+
+/* ---------------- Load data ---------------- */
+function loadInwardData(options) {
+  options = options || {};
+  var silent = !!options.silent;
+  var finish = function() {
+    if (typeof options.onComplete === 'function') options.onComplete();
+  };
+
+  installInwardUIEnhancements();
+
+  if (!window.google || !google.script || !google.script.run) {
+    console.error('google.script.run not available. This must run inside Apps Script HtmlService.');
+    finish();
+    return;
+  }
+
+  if (!silent) inShowLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      if (!silent) inShowLoading(false);
+
+      response = response || {};
+      inSetMasterRows(response.masterData || []);
+      inSetRecentRows(response.recentEntries || []);
+      inSetSuggestions(response.suggestions || { vendors: [], locations: [] });
+      inSetLoaded(true);
+
+      buildInMainGroupList();
+      buildInSuggestions();
+      buildInwardFilterLists();
+      renderInwardStats(response.stats || {});
+      renderInwardTable();
+
+      finish();
+    })
+    .withFailureHandler(function(error) {
+      if (!silent) {
+        inShowLoading(false);
+        alert('Inward data loading error: ' + ((error && error.message) || error));
+      } else {
+        console.warn('Inward auto refresh failed:', (error && error.message) || error);
+      }
+      finish();
+    })
+    .getInwardInitialData();
+}
+
+/* ---------------- Main inward form cascading list ---------------- */
+function buildInMainGroupList() {
+  var rows = inGetMasterRows();
+  inFillDatalist('inMainGroupList', rows.map(function(row) { return inGetMasterField(row, 'mainGroup'); }));
+}
+
+function onInMainGroupChange() {
+  inSetValue('inSubGroup', '');
+  inSetValue('inBrand', '');
+  inSetValue('inGoodsDescription', '');
+  inSetValue('inGoodsType', '');
+  inSetValue('inUom', '');
+  inSetValue('inModel', '');
+  inSetValue('inGoodsSerialNumber', '');
+
+  var filtered = filterInMaster({ mainGroup: inGetValue('inMainGroup') });
+
+  inFillDatalist('inSubGroupList', filtered.map(function(row) { return inGetMasterField(row, 'subGroup'); }));
+  inFillDatalist('inBrandList', filtered.map(function(row) { return inGetMasterField(row, 'brand') || 'Not Available'; }));
+  inFillDatalist('inGoodsDescriptionList', filtered.map(function(row) { return inGetMasterField(row, 'goodsDescription'); }));
+  inFillDatalist('inModelList', filtered.map(function(row) { return inGetMasterField(row, 'model') || 'Not Available'; }));
+
+  toggleSerialBox();
+}
+
+function onInSubGroupChange() {
+  inSetValue('inBrand', '');
+  inSetValue('inGoodsDescription', '');
+  inSetValue('inGoodsType', '');
+  inSetValue('inUom', '');
+  inSetValue('inModel', '');
+  inSetValue('inGoodsSerialNumber', '');
+
+  var filtered = filterInMaster({
+    mainGroup: inGetValue('inMainGroup'),
+    subGroup: inGetValue('inSubGroup')
+  });
+
+  inFillDatalist('inBrandList', filtered.map(function(row) { return inGetMasterField(row, 'brand') || 'Not Available'; }));
+  inFillDatalist('inGoodsDescriptionList', filtered.map(function(row) { return inGetMasterField(row, 'goodsDescription'); }));
+  inFillDatalist('inModelList', filtered.map(function(row) { return inGetMasterField(row, 'model') || 'Not Available'; }));
+
+  toggleSerialBox();
+}
+
+function onInBrandChange() {
+  inSetValue('inGoodsDescription', '');
+  inSetValue('inGoodsType', '');
+  inSetValue('inUom', '');
+  inSetValue('inModel', '');
+  inSetValue('inGoodsSerialNumber', '');
+
+  var filtered = filterInMaster({
+    mainGroup: inGetValue('inMainGroup'),
+    subGroup: inGetValue('inSubGroup'),
+    brand: inGetValue('inBrand')
+  });
+
+  inFillDatalist('inGoodsDescriptionList', filtered.map(function(row) { return inGetMasterField(row, 'goodsDescription'); }));
+  inFillDatalist('inModelList', filtered.map(function(row) { return inGetMasterField(row, 'model') || 'Not Available'; }));
+
+  toggleSerialBox();
+}
+
+function onInGoodsDescriptionChange() {
+  var selected = findSelectedInMaterial();
+
+  if (!selected) {
+    inSetValue('inGoodsType', '');
+    inSetValue('inUom', '');
+    inSetValue('inModel', '');
+    toggleSerialBox();
+    return;
+  }
+
+  inSetValue('inGoodsType', inGetMasterField(selected, 'goodsType') || '');
+  inSetValue('inUom', inGetMasterField(selected, 'uom') || '');
+  inSetValue('inModel', inGetMasterField(selected, 'model') || 'Not Available');
+
+  toggleSerialBox();
+}
+
+function findSelectedInMaterial() {
+  var filtered = filterInMaster({
+    mainGroup: inGetValue('inMainGroup'),
+    subGroup: inGetValue('inSubGroup'),
+    brand: inGetValue('inBrand'),
+    goodsDescription: inGetValue('inGoodsDescription')
+  });
+  return filtered[0] || null;
+}
+
+function filterInMaster(filters) {
+  filters = filters || {};
+  return inGetMasterRows().filter(function(row) {
+    if (filters.mainGroup && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(filters.mainGroup)) return false;
+    if (filters.subGroup && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(filters.subGroup)) return false;
+    if (filters.brand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(filters.brand)) return false;
+    if (filters.goodsDescription && inNorm(inGetMasterField(row, 'goodsDescription')) !== inNorm(filters.goodsDescription)) return false;
+    return true;
+  });
+}
+
+function toggleSerialBox() {
+  var goodsType = inGetValue('inGoodsType').toUpperCase();
+  var box = inEl('inSerialBox');
+  if (!box) return;
+
+  if (goodsType === 'ASSET') {
+    box.style.display = 'block';
+  } else {
+    box.style.display = 'none';
+    inSetValue('inGoodsSerialNumber', '');
+  }
+}
+
+/* ---------------- Recent filters lists and filtering ---------------- */
+function buildInwardFilterLists() {
+  if (!inEl('inwardFilterBar')) return;
+
+  var master = inGetMasterRows();
+  var recent = inGetRecentRows();
+
+  var selectedMain = inGetValue('inFilterMainGroup');
+  var selectedSub = inGetValue('inFilterSubGroup');
+  var selectedBrand = inGetValue('inFilterBrand');
+
+  fillInFilterSelect(
+    'inFilterGoodsType',
+    inUnique(
+      master.map(function(row) { return inGetMasterField(row, 'goodsType'); })
+        .concat(recent.map(function(row) { return inGetEntryField(row, 'GOODS TYPE'); }))
+    ),
+    'All Goods Type'
+  );
+
+  var mainValues = inUnique(
+    master.map(function(row) { return inGetMasterField(row, 'mainGroup'); })
+      .concat(recent.map(function(row) { return inGetEntryField(row, 'MAIN GROUP'); }))
+  );
+  inFillDatalist('inFilterMainGroupList', mainValues);
+
+  var subSource = master.filter(function(row) {
+    return !selectedMain || inNorm(inGetMasterField(row, 'mainGroup')) === inNorm(selectedMain);
+  });
+  var subValues = inUnique(
+    subSource.map(function(row) { return inGetMasterField(row, 'subGroup'); })
+      .concat(recent.filter(function(row) {
+        return !selectedMain || inNorm(inGetEntryField(row, 'MAIN GROUP')) === inNorm(selectedMain);
+      }).map(function(row) { return inGetEntryField(row, 'SUB GROUP'); }))
+  );
+  inFillDatalist('inFilterSubGroupList', subValues);
+
+  var brandSource = master.filter(function(row) {
+    if (selectedMain && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(selectedMain)) return false;
+    if (selectedSub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(selectedSub)) return false;
+    return true;
+  });
+  var brandValues = inUnique(
+    brandSource.map(function(row) { return inGetMasterField(row, 'brand') || 'Not Available'; })
+      .concat(recent.filter(function(row) {
+        if (selectedMain && inNorm(inGetEntryField(row, 'MAIN GROUP')) !== inNorm(selectedMain)) return false;
+        if (selectedSub && inNorm(inGetEntryField(row, 'SUB GROUP')) !== inNorm(selectedSub)) return false;
+        return true;
+      }).map(function(row) { return inGetEntryField(row, 'BRAND') || 'Not Available'; }))
+  );
+  inFillDatalist('inFilterBrandList', brandValues);
+
+  var descSource = master.filter(function(row) {
+    if (selectedMain && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(selectedMain)) return false;
+    if (selectedSub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(selectedSub)) return false;
+    if (selectedBrand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(selectedBrand)) return false;
+    return true;
+  });
+  var descValues = inUnique(
+    descSource.map(function(row) { return inGetMasterField(row, 'goodsDescription'); })
+      .concat(recent.filter(function(row) {
+        if (selectedMain && inNorm(inGetEntryField(row, 'MAIN GROUP')) !== inNorm(selectedMain)) return false;
+        if (selectedSub && inNorm(inGetEntryField(row, 'SUB GROUP')) !== inNorm(selectedSub)) return false;
+        if (selectedBrand && inNorm(inGetEntryField(row, 'BRAND') || 'Not Available') !== inNorm(selectedBrand)) return false;
+        return true;
+      }).map(function(row) { return inGetEntryField(row, 'GOODS DESCRIPTION'); }))
+  );
+  inFillDatalist('inFilterGoodsDescriptionList', descValues);
+}
+
+function fillInFilterSelect(id, values, defaultText) {
+  var select = inEl(id);
+  if (!select) return;
+  var current = select.value;
+  select.innerHTML = '<option value="">' + inEsc(defaultText || 'All') + '</option>';
+  inUnique(values || []).forEach(function(value) {
+    var option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  });
+  select.value = current;
+}
+
+function getFilteredInwardRows() {
+  var rows = inGetRecentRows();
+  var fromDate = inGetValue('inFilterFromDate');
+  var toDate = inGetValue('inFilterToDate');
+  var goodsType = inGetValue('inFilterGoodsType');
+  var mainGroup = inGetValue('inFilterMainGroup');
+  var subGroup = inGetValue('inFilterSubGroup');
+  var brand = inGetValue('inFilterBrand');
+  var desc = inGetValue('inFilterGoodsDescription');
+  var invoice = inNorm(inGetValue('inFilterInvoice'));
+  var dcNo = inNorm(inGetValue('inFilterDcNo'));
+  var serialNo = inNorm(inGetValue('inFilterSerialNo'));
+  var stockType = inGetValue('inFilterStockType');
+
+  return rows.filter(function(row) {
+    var rowDate = inDateKey(inGetEntryField(row, 'DATE'));
+    if (fromDate && (!rowDate || rowDate < fromDate)) return false;
+    if (toDate && (!rowDate || rowDate > toDate)) return false;
+
+    if (goodsType && inNorm(inGetEntryField(row, 'GOODS TYPE')) !== inNorm(goodsType)) return false;
+    if (mainGroup && inNorm(inGetEntryField(row, 'MAIN GROUP')) !== inNorm(mainGroup)) return false;
+    if (subGroup && inNorm(inGetEntryField(row, 'SUB GROUP')) !== inNorm(subGroup)) return false;
+    if (brand && inNorm(inGetEntryField(row, 'BRAND') || 'Not Available') !== inNorm(brand)) return false;
+    if (desc && inNorm(inGetEntryField(row, 'GOODS DESCRIPTION')) !== inNorm(desc)) return false;
+    if (stockType && inNorm(inGetEntryField(row, 'STOCK TYPE')) !== inNorm(stockType)) return false;
+
+    var deliveryValue = inNorm(inGetDeliveryChallanValue(row));
+    var invoiceValue = inNorm(inGetInvoiceNoValue(row));
+    var oldCombined = inNorm(inGetEntryField(row, 'DELIVERY CHALLAN/INVOICE NO'));
+    var serial = inNorm(inGetEntryField(row, 'GOODS SERIAL NUMBER'));
+
+    if (invoice && (invoiceValue + ' ' + oldCombined).indexOf(invoice) === -1) return false;
+    if (dcNo && (deliveryValue + ' ' + oldCombined).indexOf(dcNo) === -1) return false;
+    if (serialNo && serial.indexOf(serialNo) === -1) return false;
+
+    return true;
+  });
+}
+
+/* ---------------- Save inward form ---------------- */
+function saveInwardForm() {
+  var payload = {
+    date: inGetValue('inDate'),
+    goodsType: inGetValue('inGoodsType'),
+    mainGroup: inGetValue('inMainGroup'),
+    subGroup: inGetValue('inSubGroup'),
+    brand: inGetValue('inBrand') || 'Not Available',
+    goodsDescription: inGetValue('inGoodsDescription'),
+    uom: inGetValue('inUom'),
+    inwardQty: inGetValue('inInwardQty'),
+    model: inGetValue('inModel') || 'Not Available',
+    stockType: inGetValue('inStockType'),
+    goodsSerialNumber: inGetValue('inGoodsSerialNumber'),
+    vendorName: inGetValue('inVendorName'),
+    location: inGetValue('inLocation'),
+    deliveryChallan: inGetValue('inDeliveryChallan'),
+    invoiceNo: inGetValue('inInvoiceNo'),
+    remark: inGetValue('inRemark')
+  };
+
+  if (!payload.date) return alert('Date select karein');
+  if (!payload.mainGroup) return alert('Main Group select karein');
+  if (!payload.subGroup) return alert('Sub Group select karein');
+  if (!payload.brand) return alert('Brand select karein');
+  if (!payload.goodsDescription) return alert('Goods Description select karein');
+  if (!payload.goodsType || !payload.uom) return alert('Goods Description Material List master se select karein. Goods Type aur UOM autofill hona chahiye.');
+  if (!payload.inwardQty || Number(payload.inwardQty) <= 0) return alert('Valid Inward Qty enter karein');
+  if (!payload.stockType) return alert('Stock Type select karein');
+  if (payload.goodsType.toUpperCase() === 'ASSET' && !payload.goodsSerialNumber) return alert('Asset item ke liye Goods Serial Number required hai');
+  if (!payload.vendorName) return alert('Vendor Name / Person Name enter karein');
+  if (!payload.location) return alert('Location enter karein');
+
+  inShowLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      inShowLoading(false);
+      response = response || {};
+      alert(response.message || 'Inward entry saved');
+
+      inSetRecentRows(response.recentEntries || inGetRecentRows());
+      inSetSuggestions(response.suggestions || inGetSuggestions());
+
+      renderInwardStats(response.stats || {});
+      buildInSuggestions();
+      buildInwardFilterLists();
+      renderInwardTable();
+      clearInwardForm();
+      if (typeof setTodayDate === 'function') setTodayDate('inDate');
+    })
+    .withFailureHandler(function(error) {
+      inShowLoading(false);
+      alert('Save failed: ' + ((error && error.message) || error));
+    })
+    .saveInwardEntry(payload);
+}
+
+/* ---------------- Edit modal ---------------- */
+function ensureInwardEditModal() {
+  if (inEl('inwardEditModal')) {
+    patchInwardEditInvoiceFields();
+    ensureInwardEditDatalists();
+    makeInwardEditFieldsEditable();
+    setupInwardEditAutocomplete();
+    return;
+  }
+
+  var modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.id = 'inwardEditModal';
+  modal.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true">' +
+      '<div class="modal-header"><h3>Edit Inward Entry</h3><button type="button" class="close-btn" onclick="closeInwardEditModal()">&times;</button></div>' +
+      '<input type="hidden" id="inEditRowNumber">' +
+      '<div class="note">Ab aap inward entry ke material fields bhi edit kar sakte hain. Goods Description select karne par Goods Type, UOM aur Model autofill hoga, phir bhi aap manually correct kar sakte hain.</div>' +
+      '<div class="grid">' +
+        '<div class="form-group"><label>Date</label><input type="date" id="inEditDate"></div>' +
+        '<div class="form-group"><label>Goods Type</label><select id="inEditGoodsType" onchange="toggleInwardEditSerialBox()"><option value="">Select Goods Type</option><option value="CONSUMABLE">CONSUMABLE</option><option value="ASSET">ASSET</option></select></div>' +
+        '<div class="form-group"><label>Main Group</label><input list="inEditMainGroupList" type="text" id="inEditMainGroup" autocomplete="off" placeholder="Search Main Group" onchange="onInEditMainGroupChange()"><datalist id="inEditMainGroupList"></datalist></div>' +
+        '<div class="form-group"><label>Sub Group</label><input list="inEditSubGroupList" type="text" id="inEditSubGroup" autocomplete="off" placeholder="Search Sub Group" onchange="onInEditSubGroupChange()"><datalist id="inEditSubGroupList"></datalist></div>' +
+        '<div class="form-group"><label>Brand</label><input list="inEditBrandList" type="text" id="inEditBrand" autocomplete="off" placeholder="Search Brand" onchange="onInEditBrandChange()"><datalist id="inEditBrandList"></datalist></div>' +
+        '<div class="form-group span-2"><label>Goods Description</label><input list="inEditGoodsDescriptionList" type="text" id="inEditGoodsDescription" autocomplete="off" placeholder="Search Goods Description" onchange="onInEditGoodsDescriptionChange()"><datalist id="inEditGoodsDescriptionList"></datalist></div>' +
+        '<div class="form-group"><label>UOM</label><input list="inEditUomList" type="text" id="inEditUom" placeholder="UOM"><datalist id="inEditUomList"></datalist></div>' +
+        '<div class="form-group"><label>Inward Qty</label><input type="number" id="inEditInwardQty"></div>' +
+        '<div class="form-group"><label>Model</label><input list="inEditModelList" type="text" id="inEditModel" placeholder="Model"><datalist id="inEditModelList"></datalist></div>' +
+        '<div class="form-group"><label>Stock Type</label><select id="inEditStockType"><option value="">Select Stock Type</option><option value="REPAIRED">REPAIRED</option><option value="NEW">NEW</option><option value="OLD">OLD</option><option value="FAULTY">FAULTY</option><option value="SCRAP">SCRAP</option></select></div>' +
+        '<div class="form-group span-2" id="inEditSerialBox" style="display:none;"><label>Goods Serial Number</label><input type="text" id="inEditGoodsSerialNumber"></div>' +
+        '<div class="form-group span-2"><label>Vendor Name / Person Name</label><input type="text" id="inEditVendorName"></div>' +
+        '<div class="form-group span-2"><label>Location</label><input type="text" id="inEditLocation"></div>' +
+        '<div class="form-group span-2"><label>Delivery Challan</label><input type="text" id="inEditDeliveryChallan" placeholder="Delivery Challan No"></div>' +
+        '<div class="form-group span-2"><label>Invoice No</label><input type="text" id="inEditInvoiceNo" placeholder="Invoice No"></div>' +
+        '<div class="form-group span-4"><label>Remark</label><textarea id="inEditRemark"></textarea></div>' +
+        '<div class="form-group span-4 actions"><button type="button" class="btn btn-outline" onclick="closeInwardEditModal()">Cancel</button><button type="button" class="btn btn-primary" onclick="updateInwardForm()">Update Inward Entry</button></div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  ensureInwardEditDatalists();
+  makeInwardEditFieldsEditable();
+  setupInwardEditAutocomplete();
+}
+
+function ensureInwardEditDatalists() {
+  var ids = [
+    'inEditMainGroupList', 'inEditSubGroupList', 'inEditBrandList',
+    'inEditGoodsDescriptionList', 'inEditUomList', 'inEditModelList'
+  ];
+  ids.forEach(function(id) {
+    if (!inEl(id)) {
+      var dl = document.createElement('datalist');
+      dl.id = id;
+      document.body.appendChild(dl);
+    }
+  });
+}
+
+function makeInwardEditFieldsEditable() {
+  [
+    'inEditGoodsType', 'inEditMainGroup', 'inEditSubGroup', 'inEditBrand',
+    'inEditGoodsDescription', 'inEditUom', 'inEditModel'
+  ].forEach(function(id) {
+    var el = inEl(id);
+    if (!el) return;
+    el.removeAttribute('readonly');
+    el.classList.remove('readonly');
+  });
+}
+
+
+/* ---------------- Edit modal searchable dropdowns ---------------- */
+function inEnsureEditAutoMenu() {
+  var menu = inEl('inwardEditAutocompleteMenu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.id = 'inwardEditAutocompleteMenu';
+  menu.className = 'in-edit-autocomplete-menu';
+  document.body.appendChild(menu);
+
+  menu.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousedown', function(e) {
+    var active = inEl('inwardEditAutocompleteMenu');
+    if (!active || active.style.display === 'none') return;
+    if (active.contains(e.target)) return;
+    if (e.target && e.target.id && (
+      e.target.id === 'inEditMainGroup' ||
+      e.target.id === 'inEditSubGroup' ||
+      e.target.id === 'inEditBrand' ||
+      e.target.id === 'inEditGoodsDescription'
+    )) return;
+    hideInwardEditAutocomplete();
+  });
+
+  return menu;
+}
+
+function hideInwardEditAutocomplete() {
+  var menu = inEl('inwardEditAutocompleteMenu');
+  if (menu) menu.style.display = 'none';
+}
+
+function inGetEditAutoValues(kind) {
+  var rows = inGetMasterRows();
+  var main = inGetValue('inEditMainGroup');
+  var sub = inGetValue('inEditSubGroup');
+  var brand = inGetValue('inEditBrand');
+
+  if (kind === 'main') {
+    return inUnique(rows.map(function(row) { return inGetMasterField(row, 'mainGroup'); }));
+  }
+
+  if (kind === 'sub') {
+    return inUnique(rows.filter(function(row) {
+      return !main || inNorm(inGetMasterField(row, 'mainGroup')) === inNorm(main);
+    }).map(function(row) { return inGetMasterField(row, 'subGroup'); }));
+  }
+
+  if (kind === 'brand') {
+    return inUnique(rows.filter(function(row) {
+      if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+      if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+      return true;
+    }).map(function(row) { return inGetMasterField(row, 'brand') || 'Not Available'; }));
+  }
+
+  if (kind === 'desc') {
+    return inUnique(rows.filter(function(row) {
+      if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+      if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+      if (brand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(brand)) return false;
+      return true;
+    }).map(function(row) { return inGetMasterField(row, 'goodsDescription'); }));
+  }
+
+  return [];
+}
+
+function showInwardEditAutocomplete(inputId, kind, forceAll) {
+  var input = inEl(inputId);
+  if (!input) return;
+
+  var menu = inEnsureEditAutoMenu();
+  var allValues = inGetEditAutoValues(kind);
+  var query = inNorm(input.value);
+  var values = allValues;
+
+  if (!forceAll && query) {
+    values = allValues.filter(function(value) {
+      return inNorm(value).indexOf(query) !== -1;
+    });
+  }
+
+  menu.innerHTML = '';
+
+  if (!values.length) {
+    menu.innerHTML = '<div class="in-edit-autocomplete-empty">No matching item found</div>';
+  } else {
+    values.slice(0, 120).forEach(function(value) {
+      var item = document.createElement('div');
+      item.className = 'in-edit-autocomplete-item';
+      item.textContent = value;
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        inSetValue(inputId, value);
+        hideInwardEditAutocomplete();
+
+        if (kind === 'main') onInEditMainGroupChange();
+        else if (kind === 'sub') onInEditSubGroupChange();
+        else if (kind === 'brand') onInEditBrandChange();
+        else if (kind === 'desc') onInEditGoodsDescriptionChange();
+      });
+      menu.appendChild(item);
+    });
+  }
+
+  var rect = input.getBoundingClientRect();
+  menu.style.left = Math.max(8, rect.left) + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.width = Math.max(260, rect.width) + 'px';
+  menu.style.display = 'block';
+}
+
+function setupInwardEditAutocomplete() {
+  var configs = [
+    { id: 'inEditMainGroup', kind: 'main' },
+    { id: 'inEditSubGroup', kind: 'sub' },
+    { id: 'inEditBrand', kind: 'brand' },
+    { id: 'inEditGoodsDescription', kind: 'desc' }
+  ];
+
+  configs.forEach(function(cfg) {
+    var el = inEl(cfg.id);
+    if (!el || el.getAttribute('data-in-edit-autocomplete') === 'yes') return;
+    el.setAttribute('data-in-edit-autocomplete', 'yes');
+    el.setAttribute('autocomplete', 'off');
+
+    el.addEventListener('focus', function() {
+      showInwardEditAutocomplete(cfg.id, cfg.kind, true);
+    });
+    el.addEventListener('click', function() {
+      showInwardEditAutocomplete(cfg.id, cfg.kind, true);
+    });
+    el.addEventListener('input', function() {
+      showInwardEditAutocomplete(cfg.id, cfg.kind, false);
+      if (cfg.kind === 'main') buildInwardEditDatalists();
+      if (cfg.kind === 'sub') buildInwardEditDatalists();
+      if (cfg.kind === 'brand') buildInwardEditDatalists();
+    });
+    el.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') hideInwardEditAutocomplete();
+    });
+  });
+}
+
+function buildInwardEditDatalists() {
+  ensureInwardEditDatalists();
+  var rows = inGetMasterRows();
+  var main = inGetValue('inEditMainGroup');
+  var sub = inGetValue('inEditSubGroup');
+  var brand = inGetValue('inEditBrand');
+  var desc = inGetValue('inEditGoodsDescription');
+
+  inFillDatalist('inEditMainGroupList', rows.map(function(row) { return inGetMasterField(row, 'mainGroup'); }));
+
+  var subRows = rows.filter(function(row) {
+    return !main || inNorm(inGetMasterField(row, 'mainGroup')) === inNorm(main);
+  });
+  inFillDatalist('inEditSubGroupList', subRows.map(function(row) { return inGetMasterField(row, 'subGroup'); }));
+
+  var brandRows = rows.filter(function(row) {
+    if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+    if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+    return true;
+  });
+  inFillDatalist('inEditBrandList', brandRows.map(function(row) { return inGetMasterField(row, 'brand') || 'Not Available'; }));
+
+  var descRows = rows.filter(function(row) {
+    if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+    if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+    if (brand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(brand)) return false;
+    return true;
+  });
+  inFillDatalist('inEditGoodsDescriptionList', descRows.map(function(row) { return inGetMasterField(row, 'goodsDescription'); }));
+  inFillDatalist('inEditUomList', rows.map(function(row) { return inGetMasterField(row, 'uom'); }));
+
+  var modelRows = rows.filter(function(row) {
+    if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+    if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+    if (brand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(brand)) return false;
+    if (desc && inNorm(inGetMasterField(row, 'goodsDescription')) !== inNorm(desc)) return false;
+    return true;
+  });
+  inFillDatalist('inEditModelList', modelRows.map(function(row) { return inGetMasterField(row, 'model') || 'Not Available'; }));
+}
+
+function onInEditMainGroupChange() {
+  inSetValue('inEditSubGroup', '');
+  inSetValue('inEditBrand', '');
+  inSetValue('inEditGoodsDescription', '');
+  inSetValue('inEditGoodsType', '');
+  inSetValue('inEditUom', '');
+  inSetValue('inEditModel', '');
+  inSetValue('inEditGoodsSerialNumber', '');
+  buildInwardEditDatalists();
+  toggleInwardEditSerialBox();
+}
+
+function onInEditSubGroupChange() {
+  inSetValue('inEditBrand', '');
+  inSetValue('inEditGoodsDescription', '');
+  inSetValue('inEditGoodsType', '');
+  inSetValue('inEditUom', '');
+  inSetValue('inEditModel', '');
+  inSetValue('inEditGoodsSerialNumber', '');
+  buildInwardEditDatalists();
+  toggleInwardEditSerialBox();
+}
+
+function onInEditBrandChange() {
+  inSetValue('inEditGoodsDescription', '');
+  inSetValue('inEditGoodsType', '');
+  inSetValue('inEditUom', '');
+  inSetValue('inEditModel', '');
+  inSetValue('inEditGoodsSerialNumber', '');
+  buildInwardEditDatalists();
+  toggleInwardEditSerialBox();
+}
+
+function onInEditGoodsDescriptionChange() {
+  var selected = findSelectedInwardEditMaterial();
+  if (selected) {
+    inSetValue('inEditGoodsType', inGetMasterField(selected, 'goodsType') || '');
+    inSetValue('inEditUom', inGetMasterField(selected, 'uom') || '');
+    inSetValue('inEditModel', inGetMasterField(selected, 'model') || 'Not Available');
+  }
+  buildInwardEditDatalists();
+  toggleInwardEditSerialBox();
+}
+
+function findSelectedInwardEditMaterial() {
+  var main = inGetValue('inEditMainGroup');
+  var sub = inGetValue('inEditSubGroup');
+  var brand = inGetValue('inEditBrand');
+  var desc = inGetValue('inEditGoodsDescription');
+  return inGetMasterRows().find(function(row) {
+    if (main && inNorm(inGetMasterField(row, 'mainGroup')) !== inNorm(main)) return false;
+    if (sub && inNorm(inGetMasterField(row, 'subGroup')) !== inNorm(sub)) return false;
+    if (brand && inNorm(inGetMasterField(row, 'brand') || 'Not Available') !== inNorm(brand)) return false;
+    if (desc && inNorm(inGetMasterField(row, 'goodsDescription')) !== inNorm(desc)) return false;
+    return true;
+  }) || null;
+}
+
+function openInwardEdit(rowNumber) {
+  ensureInwardEditModal();
+
+  var rows = inGetRecentRows();
+  var row = rows.find(function(item) {
+    return Number(item.rowNumber) === Number(rowNumber);
+  });
+
+  if (!row) {
+    alert('Inward row not found. Please refresh and try again.');
+    return;
+  }
+
+  inSetValue('inEditRowNumber', row.rowNumber);
+  inSetValue('inEditDate', inToInputDate(inGetEntryField(row, 'DATE')));
+  inSetValue('inEditGoodsType', inGetEntryField(row, 'GOODS TYPE'));
+  inSetValue('inEditMainGroup', inGetEntryField(row, 'MAIN GROUP'));
+  inSetValue('inEditSubGroup', inGetEntryField(row, 'SUB GROUP'));
+  inSetValue('inEditBrand', inGetEntryField(row, 'BRAND'));
+  inSetValue('inEditGoodsDescription', inGetEntryField(row, 'GOODS DESCRIPTION'));
+  inSetValue('inEditUom', inGetEntryField(row, 'UOM'));
+  inSetValue('inEditInwardQty', inGetEntryField(row, 'INWARD QTY'));
+  inSetValue('inEditModel', inGetEntryField(row, 'MODEL') || 'Not Available');
+  inSetValue('inEditStockType', inGetEntryField(row, 'STOCK TYPE'));
+  inSetValue('inEditGoodsSerialNumber', inGetEntryField(row, 'GOODS SERIAL NUMBER'));
+  inSetValue('inEditVendorName', inGetEntryField(row, 'VENDOR NAME / PERSON NAME'));
+  inSetValue('inEditLocation', inGetEntryField(row, 'LOCATION'));
+  inSetValue('inEditDeliveryChallan', inGetDeliveryChallanValue(row));
+  inSetValue('inEditInvoiceNo', inGetInvoiceNoValue(row));
+  inSetValue('inEditRemark', inGetEntryField(row, 'REMARK'));
+
+  makeInwardEditFieldsEditable();
+  setupInwardEditAutocomplete();
+  buildInwardEditDatalists();
+  toggleInwardEditSerialBox();
+
+  var modal = inEl('inwardEditModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    var inner = modal.querySelector('.modal');
+    if (inner) inner.style.display = 'block';
+  }
+}
+
+function toggleInwardEditSerialBox() {
+  var serialBox = inEl('inEditSerialBox');
+  if (!serialBox) return;
+
+  if (String(inGetValue('inEditGoodsType') || '').toUpperCase() === 'ASSET') {
+    serialBox.style.display = 'block';
+  } else {
+    serialBox.style.display = 'none';
+    inSetValue('inEditGoodsSerialNumber', '');
+  }
+}
+
+function closeInwardEditModal() {
+  var modal = inEl('inwardEditModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function updateInwardForm() {
+  var payload = {
+    rowNumber: inGetValue('inEditRowNumber'),
+    date: inGetValue('inEditDate'),
+    goodsType: inGetValue('inEditGoodsType'),
+    mainGroup: inGetValue('inEditMainGroup'),
+    subGroup: inGetValue('inEditSubGroup'),
+    brand: inGetValue('inEditBrand') || 'Not Available',
+    goodsDescription: inGetValue('inEditGoodsDescription'),
+    uom: inGetValue('inEditUom'),
+    inwardQty: inGetValue('inEditInwardQty'),
+    model: inGetValue('inEditModel') || 'Not Available',
+    stockType: inGetValue('inEditStockType'),
+    goodsSerialNumber: inGetValue('inEditGoodsSerialNumber'),
+    vendorName: inGetValue('inEditVendorName'),
+    location: inGetValue('inEditLocation'),
+    deliveryChallan: inGetValue('inEditDeliveryChallan'),
+    invoiceNo: inGetValue('inEditInvoiceNo'),
+    remark: inGetValue('inEditRemark')
+  };
+
+  if (!payload.rowNumber) return alert('Row number missing. Please refresh and try again.');
+  if (!payload.date) return alert('Date select karein');
+  if (!payload.goodsType) return alert('Goods Type select/enter karein');
+  if (!payload.mainGroup) return alert('Main Group select/enter karein');
+  if (!payload.subGroup) return alert('Sub Group select/enter karein');
+  if (!payload.brand) return alert('Brand enter karein');
+  if (!payload.goodsDescription) return alert('Goods Description select/enter karein');
+  if (!payload.uom) return alert('UOM enter karein');
+  if (!payload.inwardQty || Number(payload.inwardQty) <= 0) return alert('Valid Inward Qty enter karein');
+  if (!payload.stockType) return alert('Stock Type select karein');
+  if (String(payload.goodsType).toUpperCase() === 'ASSET' && !payload.goodsSerialNumber) return alert('Asset item ke liye Goods Serial Number required hai');
+  if (!payload.vendorName) return alert('Vendor Name / Person Name enter karein');
+  if (!payload.location) return alert('Location enter karein');
+
+  inShowLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      inShowLoading(false);
+      response = response || {};
+      alert(response.message || 'Inward entry updated');
+
+      inSetRecentRows(response.recentEntries || inGetRecentRows());
+      inSetSuggestions(response.suggestions || inGetSuggestions());
+
+      renderInwardStats(response.stats || {});
+      buildInMainGroupList();
+      buildInSuggestions();
+      buildInwardFilterLists();
+      renderInwardTable();
+      closeInwardEditModal();
+    })
+    .withFailureHandler(function(error) {
+      inShowLoading(false);
+      alert('Inward update failed: ' + ((error && error.message) || error));
+    })
+    .updateInwardEntry(payload);
+}
+
+/* ---------------- Render stats and table ---------------- */
+function renderInwardStats(stats) {
+  stats = stats || { totalEntries: 0, todayEntries: 0, assetEntries: 0, totalQty: 0 };
+  inSetText('inTotalEntries', stats.totalEntries || 0);
+  inSetText('inTodayEntries', stats.todayEntries || 0);
+  inSetText('inAssetEntries', stats.assetEntries || 0);
+  inSetText('inTotalQty', stats.totalQty || 0);
+}
+
+function renderInwardTable() {
+  installInwardUIEnhancements();
+
+  var tbody = inEl('inwardTableBody');
+  var empty = inEl('inwardEmptyState');
+  if (!tbody || !empty) return;
+
+  var allRows = inGetRecentRows();
+  var rows = getFilteredInwardRows();
+
+  tbody.innerHTML = '';
+  inSetText('inRecentCount', rows.length + ' / ' + allRows.length + ' Entries');
+
+  if (!rows.length) {
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  var fragment = document.createDocumentFragment();
+
+  rows.forEach(function(row) {
+    var tr = document.createElement('tr');
+    var rowNumber = row.rowNumber || '';
+
+    tr.innerHTML =
+      '<td>' + inEsc(inGetEntryField(row, 'DATE')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'GOODS TYPE')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'MAIN GROUP')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'SUB GROUP')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'BRAND')) + '</td>' +
+      '<td><b>' + inEsc(inGetEntryField(row, 'GOODS DESCRIPTION')) + '</b></td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'UOM')) + '</td>' +
+      '<td><b>' + inEsc(inGetEntryField(row, 'INWARD QTY')) + '</b></td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'MODEL')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'STOCK TYPE')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'GOODS SERIAL NUMBER')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'VENDOR NAME / PERSON NAME')) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'LOCATION')) + '</td>' +
+      '<td>' + inEsc(inGetDeliveryChallanValue(row)) + '</td>' +
+      '<td>' + inEsc(inGetInvoiceNoValue(row)) + '</td>' +
+      '<td>' + inEsc(inGetEntryField(row, 'REMARK')) + '</td>' +
+      '<td><button type="button" class="btn btn-outline btn-sm" onclick="openInwardEdit(' + inEscAttr(rowNumber) + ')">Edit</button></td>';
+
+    fragment.appendChild(tr);
+  });
+
+  tbody.appendChild(fragment);
+}
+
+/* ---------------- Suggestions and clear form ---------------- */
+function buildInSuggestions() {
+  var suggestions = inGetSuggestions();
+  inFillDatalist('inVendorList', suggestions.vendors || []);
+  inFillDatalist('inLocationList', suggestions.locations || []);
+}
+
+function clearInwardForm() {
+  inSetValue('inMainGroup', '');
+  inSetValue('inSubGroup', '');
+  inSetValue('inBrand', '');
+  inSetValue('inGoodsDescription', '');
+  inSetValue('inGoodsType', '');
+  inSetValue('inUom', '');
+  inSetValue('inInwardQty', '');
+  inSetValue('inModel', '');
+  inSetValue('inStockType', '');
+  inSetValue('inGoodsSerialNumber', '');
+  inSetValue('inVendorName', '');
+  inSetValue('inLocation', '');
+  inSetValue('inDeliveryChallan', '');
+  inSetValue('inInvoiceNo', '');
+  inSetValue('inRemark', '');
+
+  inFillDatalist('inSubGroupList', []);
+  inFillDatalist('inBrandList', []);
+  inFillDatalist('inGoodsDescriptionList', []);
+  inFillDatalist('inModelList', []);
+
+  toggleSerialBox();
+}
+
+/* ---------------- Auto install after file include ---------------- */
+(function initClientInwardEnhancements() {
+  setTimeout(function() {
+    installInwardUIEnhancements();
+    buildInwardFilterLists();
+  }, 200);
+})();
+</script>

@@ -1,0 +1,406 @@
+<script>
+  let inventoryRows = [];
+  let inventoryLoaded = false;
+  let inventoryViewMode = 'summary';
+  const INVENTORY_TYPES_CLIENT = ['NEW', 'OLD', 'REPAIRED', 'FAULTY', 'SCRAP'];
+
+
+  /* =========================
+     INVENTORY TABLE STABILITY FIX
+     - Auto refresh ke baad horizontal/vertical scroll same jagah rahega
+     - Action column se Goods Type par jump nahi hoga
+     - Save Location ke baad bhi same position preserve hogi
+  ========================= */
+  let inventoryScrollMemory = {
+    left: 0,
+    top: 0
+  };
+
+  function getInventoryTableWrap() {
+    return document.querySelector('#inventoryModule .inventory-table-wrap') ||
+      document.querySelector('#inventoryModule .table-wrap');
+  }
+
+  function captureInventoryScroll() {
+    const wrap = getInventoryTableWrap();
+    if (!wrap) {
+      return {
+        left: inventoryScrollMemory.left || 0,
+        top: inventoryScrollMemory.top || 0
+      };
+    }
+
+    inventoryScrollMemory.left = wrap.scrollLeft || 0;
+    inventoryScrollMemory.top = wrap.scrollTop || 0;
+
+    return {
+      left: inventoryScrollMemory.left,
+      top: inventoryScrollMemory.top
+    };
+  }
+
+  function restoreInventoryScroll(position) {
+    const wrap = getInventoryTableWrap();
+    if (!wrap) return;
+
+    const pos = position || inventoryScrollMemory || {
+      left: 0,
+      top: 0
+    };
+
+    const left = Number(pos.left) || 0;
+    const top = Number(pos.top) || 0;
+
+    function applyScroll() {
+      wrap.scrollLeft = left;
+      wrap.scrollTop = top;
+      inventoryScrollMemory.left = left;
+      inventoryScrollMemory.top = top;
+    }
+
+    applyScroll();
+    setTimeout(applyScroll, 0);
+    setTimeout(applyScroll, 80);
+    if (window.requestAnimationFrame) {
+      window.requestAnimationFrame(applyScroll);
+    }
+  }
+
+  function rememberInventoryScrollOnUserMove() {
+    const wrap = getInventoryTableWrap();
+    if (!wrap || wrap.dataset.scrollMemoryAttached === 'yes') return;
+
+    wrap.dataset.scrollMemoryAttached = 'yes';
+    wrap.addEventListener('scroll', function() {
+      inventoryScrollMemory.left = wrap.scrollLeft || 0;
+      inventoryScrollMemory.top = wrap.scrollTop || 0;
+    }, { passive: true });
+  }
+
+  function setDefaultInventoryPeriod(force) {
+    const input = document.getElementById('inventoryPeriod');
+    if (!input) return;
+    if (!force && input.value) return;
+
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    input.value = yyyy + '-' + mm;
+  }
+
+  function loadInventoryData(options) {
+    options = options || {};
+    const silent = !!options.silent;
+
+    /*
+      Default behavior ab scroll preserve karega.
+      Sirf jab explicitly keepScroll:false pass hoga tab scroll reset hoga.
+    */
+    const keepScroll = options.keepScroll !== false;
+    const savedScroll = captureInventoryScroll();
+
+    const finish = function() {
+      if (typeof options.onComplete === 'function') options.onComplete();
+    };
+
+    setDefaultInventoryPeriod(false);
+    rememberInventoryScrollOnUserMove();
+
+    if (!silent) showLoading(true);
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (!silent) showLoading(false);
+        inventoryLoaded = true;
+        inventoryRows = response.rows || [];
+
+        setValue('inventoryPeriod', response.period || getValue('inventoryPeriod'));
+        setText('inventoryPeriodLabel', response.periodLabel || '');
+        setText('inventoryDateRange', (response.fromDate || '') + ' to ' + (response.toDate || ''));
+
+        renderInventoryStats(response.stats || {});
+        renderInventoryTable();
+
+        if (keepScroll) {
+          restoreInventoryScroll(savedScroll);
+        } else {
+          restoreInventoryScroll({ left: 0, top: 0 });
+        }
+
+        finish();
+      })
+      .withFailureHandler(function(error) {
+        if (!silent) {
+          showLoading(false);
+          alert('Inventory loading error: ' + error.message);
+        } else {
+          console.warn('Inventory auto refresh failed:', error.message);
+        }
+        finish();
+      })
+      .getInventoryInitialData({
+        period: getValue('inventoryPeriod'),
+        syncSheet: options.syncSheet === true
+      });
+  }
+
+  function renderInventoryStats(stats) {
+    setText('invTotalItems', stats.totalItems || 0);
+    setText('invCurrentQty', formatQty(stats.totalCurrentQty || 0));
+    setText('invReorderRequired', stats.reorderRequired || 0);
+    setText('invPeriodMovement', formatQty(stats.totalInwardQty || 0) + ' / ' + formatQty(stats.totalOutwardQty || 0));
+    setText('invNegativeStock', stats.negativeStockItems || 0);
+    setText('inventoryVisibleCount', inventoryRows.length + ' Items');
+  }
+
+  function setInventoryView(mode) {
+    inventoryViewMode = mode === 'detail' ? 'detail' : 'summary';
+    const summaryBtn = document.getElementById('inventorySummaryTab');
+    const detailBtn = document.getElementById('inventoryDetailTab');
+    if (summaryBtn) summaryBtn.classList.toggle('active', inventoryViewMode === 'summary');
+    if (detailBtn) detailBtn.classList.toggle('active', inventoryViewMode === 'detail');
+    renderInventoryTable();
+    const wrap = document.querySelector('#inventoryModule .table-wrap');
+    if (wrap) {
+      wrap.scrollLeft = 0;
+      wrap.scrollTop = 0;
+    }
+  }
+
+  function renderInventoryTable() {
+    rememberInventoryScrollOnUserMove();
+    const table = document.getElementById('inventoryDataTable');
+    const thead = document.getElementById('inventoryTableHead');
+    const tbody = document.getElementById('inventoryTableBody');
+    const empty = document.getElementById('inventoryEmptyState');
+    if (!table || !thead || !tbody || !empty) return;
+
+    if (inventoryViewMode === 'detail') {
+      table.className = 'inventory-table inventory-table-detail';
+      renderInventoryDetailHeader(thead);
+    } else {
+      table.className = 'inventory-table inventory-table-summary';
+      renderInventorySummaryHeader(thead);
+    }
+
+    tbody.innerHTML = '';
+
+    const filtered = getFilteredInventoryRows();
+    setText('inventoryVisibleCount', filtered.length + ' Items');
+
+    if (!filtered.length) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    filtered.forEach(function(row, index) {
+      const tr = document.createElement('tr');
+      if (row.unmapped) tr.classList.add('row-warning');
+
+      if (inventoryViewMode === 'detail') {
+        tr.innerHTML = getInventoryDetailRowHtml(row, index);
+      } else {
+        tr.innerHTML = getInventorySummaryRowHtml(row, index);
+      }
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderInventorySummaryHeader(thead) {
+    thead.innerHTML = `
+      <tr>
+        <th>Goods Type</th>
+        <th>Main Group</th>
+        <th>Sub Group</th>
+        <th>Goods Description</th>
+        <th>UOM</th>
+        <th>Brand</th>
+        <th>Model</th>
+        <th>Current Stock Level</th>
+        <th>Minimum Stock Qty</th>
+        <th>Reorder Indicator</th>
+        <th>Storage Location</th>
+        <th>Action</th>
+      </tr>
+    `;
+  }
+
+  function renderInventoryDetailHeader(thead) {
+    thead.innerHTML = `
+      <tr class="inventory-group-head">
+        <th colspan="8">ITEM MASTER - SHEET2</th>
+        <th colspan="5">OP.STK</th>
+        <th colspan="5">INWARD</th>
+        <th colspan="5">OUTWARD</th>
+        <th colspan="5">CURRENT STK</th>
+        <th rowspan="2">CURRENT STOCK LEVEL</th>
+        <th rowspan="2">MINIMUM STOCK QTY</th>
+        <th rowspan="2">REORDER INDICATOR</th>
+        <th rowspan="2">STORAGE LOCATION</th>
+        <th rowspan="2">ACTION</th>
+      </tr>
+      <tr>
+        <th>Goods Type</th>
+        <th>Main Group</th>
+        <th>Sub Group</th>
+        <th>Goods Description</th>
+        <th>UOM</th>
+        <th>Minimum Stock Qty</th>
+        <th>Brand</th>
+        <th>Model</th>
+        ${INVENTORY_TYPES_CLIENT.map(function(type) { return '<th>' + type + '</th>'; }).join('')}
+        ${INVENTORY_TYPES_CLIENT.map(function(type) { return '<th>' + type + '</th>'; }).join('')}
+        ${INVENTORY_TYPES_CLIENT.map(function(type) { return '<th>' + type + '</th>'; }).join('')}
+        ${INVENTORY_TYPES_CLIENT.map(function(type) { return '<th>' + type + '</th>'; }).join('')}
+      </tr>
+    `;
+  }
+
+  function getInventorySummaryRowHtml(row, index) {
+    const badgeClass = row.reorderRequired ? 'badge-danger' : 'badge-success';
+    const badgeText = row.reorderRequired ? 'REORDER REQUIRED' : 'NOT REQUIRED';
+    const inputId = 'invLocation_' + index;
+
+    return `
+      <td>${esc(row.goodsType)}</td>
+      <td>${esc(row.mainGroup)}</td>
+      <td>${esc(row.subGroup)}</td>
+      <td class="inventory-item-name">${esc(row.goodsDescription)}</td>
+      <td>${esc(row.uom)}</td>
+      <td>${esc(row.brand)}</td>
+      <td>${esc(row.model)}</td>
+      <td class="cell-num inventory-current-total">${formatQty(row.currentStockLevel)}</td>
+      <td class="cell-num">${formatQty(row.minimumStockQty)}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td>
+        <input class="inventory-location-input" type="text" id="${inputId}" value="${escAttr(row.storageLocation)}" placeholder="Rack / bin / room">
+      </td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="saveInventoryLocation('${escJs(row.itemKey)}', '${inputId}')">Save</button>
+      </td>
+    `;
+  }
+
+  function getInventoryDetailRowHtml(row, index) {
+    const badgeClass = row.reorderRequired ? 'badge-danger' : 'badge-success';
+    const badgeText = row.reorderRequired ? 'REORDER REQUIRED' : 'NOT REQUIRED';
+    const inputId = 'invLocation_' + index;
+
+    return `
+      <td>${esc(row.goodsType)}</td>
+      <td>${esc(row.mainGroup)}</td>
+      <td>${esc(row.subGroup)}</td>
+      <td class="inventory-item-name">${esc(row.goodsDescription)}</td>
+      <td>${esc(row.uom)}</td>
+      <td class="cell-num">${formatQty(row.minimumStockQty)}</td>
+      <td>${esc(row.brand)}</td>
+      <td>${esc(row.model)}</td>
+      ${renderInventoryStockCells(row.opening)}
+      ${renderInventoryStockCells(row.inward)}
+      ${renderInventoryStockCells(row.outward)}
+      ${renderInventoryStockCells(row.current, true)}
+      <td class="cell-num inventory-current-total">${formatQty(row.currentStockLevel)}</td>
+      <td class="cell-num">${formatQty(row.minimumStockQty)}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td>
+        <input class="inventory-location-input" type="text" id="${inputId}" value="${escAttr(row.storageLocation)}" placeholder="Rack / bin / room">
+      </td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="saveInventoryLocation('${escJs(row.itemKey)}', '${inputId}')">Save</button>
+      </td>
+    `;
+  }
+
+  function renderInventoryStockCells(stockObj, highlightNegative) {
+    return INVENTORY_TYPES_CLIENT.map(function(type) {
+      const value = Number(stockObj && stockObj[type]) || 0;
+      const cls = highlightNegative && value < 0 ? 'cell-num stock-negative' : 'cell-num';
+      return '<td class="' + cls + '">' + formatQty(value) + '</td>';
+    }).join('');
+  }
+
+  function getFilteredInventoryRows() {
+    const searchText = getValue('inventorySearchBox').toLowerCase();
+    const locationText = getValue('inventoryLocationFinder').toLowerCase();
+    const reorderFilter = getValue('inventoryReorderFilter');
+
+    return inventoryRows.filter(function(row) {
+      if (reorderFilter === 'REORDER' && !row.reorderRequired) return false;
+      if (reorderFilter === 'OK' && row.reorderRequired) return false;
+
+      const searchArea = [
+        row.goodsType,
+        row.mainGroup,
+        row.subGroup,
+        row.goodsDescription,
+        row.uom,
+        row.brand,
+        row.model,
+        row.storageLocation,
+        row.reorderIndicator
+      ].join(' ').toLowerCase();
+
+      if (searchText && searchArea.indexOf(searchText) === -1) return false;
+
+      const locationArea = [
+        row.goodsDescription,
+        row.mainGroup,
+        row.subGroup,
+        row.brand,
+        row.model,
+        row.storageLocation
+      ].join(' ').toLowerCase();
+
+      if (locationText && locationArea.indexOf(locationText) === -1) return false;
+      return true;
+    });
+  }
+
+  function saveInventoryLocation(itemKey, inputId) {
+    const input = document.getElementById(inputId);
+    const location = input ? input.value : '';
+    const savedScroll = captureInventoryScroll();
+
+    showLoading(true);
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        showLoading(false);
+        inventoryRows = response.rows || [];
+        setValue('inventoryPeriod', response.period || getValue('inventoryPeriod'));
+        renderInventoryStats(response.stats || {});
+        renderInventoryTable();
+        restoreInventoryScroll(savedScroll);
+      })
+      .withFailureHandler(function(error) {
+        showLoading(false);
+        alert('Location update failed: ' + error.message);
+        restoreInventoryScroll(savedScroll);
+      })
+      .updateInventoryStorageLocation({
+        itemKey: itemKey,
+        location: location,
+        period: getValue('inventoryPeriod')
+      });
+  }
+
+  function formatQty(value) {
+    const number = Number(value) || 0;
+    if (number === 0) return '-';
+    return number.toLocaleString('en-IN');
+  }
+
+  function escAttr(value) {
+    return esc(value).replace(/"/g, '&quot;');
+  }
+
+  function escJs(value) {
+    return String(value || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '&quot;');
+  }
+</script>

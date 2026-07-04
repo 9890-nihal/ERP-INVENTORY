@@ -1,0 +1,518 @@
+<script>
+/* =========================
+   MATERIAL LIST CLIENT MODULE
+========================= */
+
+let materialRows = [];
+let materialFilters = {};
+let materialLoaded = false;
+
+(function installMaterialHooks() {
+  const oldHideAllModules = window.hideAllModules;
+  window.hideAllModules = function() {
+    if (typeof oldHideAllModules === 'function') oldHideAllModules();
+    hideMaterialModuleOnly();
+  };
+
+  const oldClearMainMenuActive = window.clearMainMenuActive;
+  window.clearMainMenuActive = function() {
+    if (typeof oldClearMainMenuActive === 'function') oldClearMainMenuActive();
+    const menu = document.getElementById('menuMaterial');
+    if (menu) menu.classList.remove('active');
+  };
+
+  const oldShowModule = window.showModule;
+  window.showModule = function(moduleName) {
+    if (moduleName === 'material') {
+      showMaterialModule();
+      return;
+    }
+
+    hideMaterialModuleOnly();
+
+    if (typeof oldShowModule === 'function') {
+      oldShowModule(moduleName);
+    }
+  };
+
+  setTimeout(function() {
+    installMaterialMenu();
+    installMaterialModuleShell();
+  }, 200);
+})();
+
+function installMaterialMenu() {
+  if (document.getElementById('menuMaterial')) return;
+
+  const inventoryMenu = document.getElementById('menuInventory');
+  if (!inventoryMenu || !inventoryMenu.parentElement) return;
+
+  const item = document.createElement('div');
+  item.className = 'menu-item';
+  item.id = 'menuMaterial';
+  item.onclick = function() {
+    showModule('material');
+  };
+  item.innerHTML = `
+    <span class="menu-icon">▦</span>
+    <span>Material List</span>
+  `;
+
+  inventoryMenu.parentElement.insertBefore(item, inventoryMenu.nextSibling);
+}
+
+function installMaterialModuleShell() {
+  let section = document.getElementById('materialModule');
+
+  if (!section) {
+    const content = document.querySelector('.content');
+    if (!content) return;
+
+    section = document.createElement('section');
+    section.id = 'materialModule';
+    section.style.display = 'none';
+
+    const reports = document.getElementById('reportsModule');
+    if (reports) content.insertBefore(section, reports);
+    else content.appendChild(section);
+  }
+
+  if (section.getAttribute('data-installed') === 'yes') return;
+  section.setAttribute('data-installed', 'yes');
+
+  section.innerHTML = `
+    <div class="chip-grid material-kpis">
+      <div class="chip">
+        <span>Total Materials</span>
+        <h2 id="matTotalItems">0</h2>
+      </div>
+      <div class="chip">
+        <span>Consumables</span>
+        <h2 id="matConsumableItems">0</h2>
+      </div>
+      <div class="chip">
+        <span>Assets</span>
+        <h2 id="matAssetItems">0</h2>
+      </div>
+      <div class="chip">
+        <span>Blank MOQ / Brand</span>
+        <h2 id="matBlankHealth">0 / 0</h2>
+      </div>
+    </div>
+
+    <div class="panel material-panel">
+      <div class="panel-header material-panel-header">
+        <div>
+          <h3>Material List Master</h3>
+          <span class="muted">Add, update, delete and search master materials from Material List sheet.</span>
+        </div>
+
+        <div class="material-toolbar">
+          <input type="text" id="materialSearchBox" placeholder="Search item, group, brand..." onkeyup="renderMaterialTable()">
+          <select id="materialGoodsTypeFilter" onchange="renderMaterialTable()">
+            <option value="">All Goods Type</option>
+          </select>
+          <select id="materialMainGroupFilter" onchange="onMaterialMainGroupFilterChange()">
+            <option value="">All Main Group</option>
+          </select>
+          <button class="btn btn-outline" onclick="loadMaterialData()">Refresh</button>
+          <button class="btn btn-primary" onclick="openMaterialModal()">Add Material</button>
+        </div>
+      </div>
+
+      <div class="material-mini-strip">
+        <span class="badge badge-warning" id="materialVisibleCount">0 Items</span>
+        <span class="muted">Sheet: <b>Material List</b></span>
+        <span class="muted">Columns: Goods Type, Main Group, Sub Group, Item Name, UOM, MOQ, Brand, Model</span>
+      </div>
+
+      <div class="table-wrap material-table-wrap">
+        <table class="material-table">
+          <thead>
+            <tr>
+              <th>Goods Type</th>
+              <th>Main Group</th>
+              <th>Sub Group</th>
+              <th>Item Name</th>
+              <th>UOM</th>
+              <th>MOQ / Min Qty</th>
+              <th>Brand</th>
+              <th>Model</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="materialTableBody"></tbody>
+        </table>
+
+        <div class="empty-state" id="materialEmptyState">
+          No material found
+        </div>
+      </div>
+    </div>
+  `;
+
+  installMaterialModal();
+}
+
+function installMaterialModal() {
+  if (document.getElementById('materialEditModal')) return;
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.id = 'materialEditModal';
+
+  modal.innerHTML = `
+    <div class="modal material-modal">
+      <div class="modal-header">
+        <h3 id="materialModalTitle">Add Material</h3>
+        <button class="close-btn" onclick="closeMaterialModal()">×</button>
+      </div>
+
+      <input type="hidden" id="matEditRowNumber">
+
+      <div class="grid material-form-grid">
+        <div class="form-group">
+          <label>Goods Type</label>
+          <select id="matGoodsType">
+            <option value="CONSUMABLE">CONSUMABLE</option>
+            <option value="ASSET">ASSET</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Main Group</label>
+          <input list="matMainGroupList" id="matMainGroup" placeholder="Main Group">
+          <datalist id="matMainGroupList"></datalist>
+        </div>
+
+        <div class="form-group">
+          <label>Sub Group</label>
+          <input list="matSubGroupList" id="matSubGroup" placeholder="Sub Group">
+          <datalist id="matSubGroupList"></datalist>
+        </div>
+
+        <div class="form-group">
+          <label>UOM</label>
+          <input list="matUomList" id="matUom" placeholder="NOS">
+          <datalist id="matUomList"></datalist>
+        </div>
+
+        <div class="form-group span-2">
+          <label>Item Name</label>
+          <input type="text" id="matItemName" placeholder="Material item name">
+        </div>
+
+        <div class="form-group">
+          <label>MOQ / Minimum Stock Qty</label>
+          <input type="number" id="matMoq" placeholder="Minimum Qty">
+        </div>
+
+        <div class="form-group">
+          <label>Brand</label>
+          <input list="matBrandList" id="matBrand" placeholder="Brand">
+          <datalist id="matBrandList"></datalist>
+        </div>
+
+        <div class="form-group span-2">
+          <label>Model</label>
+          <input list="matModelList" id="matModel" placeholder="Model">
+          <datalist id="matModelList"></datalist>
+        </div>
+
+        <div class="form-group span-4 actions">
+          <button class="btn btn-outline" onclick="closeMaterialModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveMaterialForm()">Save Material</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+}
+
+function showMaterialModule() {
+  installMaterialMenu();
+  installMaterialModuleShell();
+
+  showLoading(false);
+
+  if (typeof hideAllModules === 'function') hideAllModules();
+  if (typeof clearMainMenuActive === 'function') clearMainMenuActive();
+
+  if (typeof closeReportsMenuOnly === 'function') closeReportsMenuOnly();
+  if (typeof clearReportSubmenuActive === 'function') clearReportSubmenuActive();
+
+  const section = document.getElementById('materialModule');
+  if (section) section.style.display = 'block';
+
+  const menu = document.getElementById('menuMaterial');
+  if (menu) menu.classList.add('active');
+
+  setText('pageTitle', 'Material List');
+  setText('pageSubtitle', 'Master material add, update, delete and search control');
+
+  loadMaterialData();
+}
+
+function hideMaterialModuleOnly() {
+  const section = document.getElementById('materialModule');
+  if (section) section.style.display = 'none';
+
+  const menu = document.getElementById('menuMaterial');
+  if (menu) menu.classList.remove('active');
+}
+
+function loadMaterialData(options) {
+  options = options || {};
+  const silent = !!options.silent;
+  const finish = function() {
+    if (typeof options.onComplete === 'function') options.onComplete();
+  };
+
+  installMaterialModuleShell();
+
+  if (!silent) showLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      if (!silent) showLoading(false);
+
+      materialLoaded = true;
+      materialRows = response.rows || [];
+      materialFilters = response.filters || {};
+
+      renderMaterialStats(response.stats || {});
+      renderMaterialFilters();
+      renderMaterialTable();
+      buildMaterialDatalists();
+
+      finish();
+    })
+    .withFailureHandler(function(error) {
+      if (!silent) {
+        showLoading(false);
+        alert('Material loading error: ' + error.message);
+      } else {
+        console.warn('Material auto refresh failed:', error.message);
+      }
+      finish();
+    })
+    .getMaterialListInitialData();
+}
+
+function renderMaterialStats(stats) {
+  setText('matTotalItems', stats.totalItems || 0);
+  setText('matConsumableItems', stats.consumableItems || 0);
+  setText('matAssetItems', stats.assetItems || 0);
+  setText('matBlankHealth', (stats.blankMoq || 0) + ' / ' + (stats.blankBrand || 0));
+}
+
+function renderMaterialFilters() {
+  fillMaterialSelect('materialGoodsTypeFilter', materialFilters.goodsTypes || [], 'All Goods Type');
+  fillMaterialSelect('materialMainGroupFilter', materialFilters.mainGroups || [], 'All Main Group');
+}
+
+function fillMaterialSelect(id, values, defaultText) {
+  const select = document.getElementById(id);
+  if (!select) return;
+
+  const current = select.value;
+  select.innerHTML = '<option value="">' + defaultText + '</option>';
+
+  values.forEach(function(value) {
+    if (!value) return;
+    const option = document.createElement('option');
+    option.value = value;
+    option.innerText = value;
+    select.appendChild(option);
+  });
+
+  select.value = current;
+}
+
+function buildMaterialDatalists() {
+  fillDatalist('matMainGroupList', materialFilters.mainGroups || []);
+  fillDatalist('matSubGroupList', materialFilters.subGroups || []);
+  fillDatalist('matUomList', materialFilters.uoms || []);
+  fillDatalist('matBrandList', materialFilters.brands || []);
+  fillDatalist('matModelList', materialFilters.models || []);
+}
+
+function onMaterialMainGroupFilterChange() {
+  renderMaterialTable();
+}
+
+function getFilteredMaterialRows() {
+  const search = getValue('materialSearchBox').toLowerCase();
+  const goodsType = getValue('materialGoodsTypeFilter');
+  const mainGroup = getValue('materialMainGroupFilter');
+
+  return materialRows.filter(function(row) {
+    if (goodsType && row.goodsType !== goodsType) return false;
+    if (mainGroup && row.mainGroup !== mainGroup) return false;
+
+    const searchArea = [
+      row.goodsType,
+      row.mainGroup,
+      row.subGroup,
+      row.itemName,
+      row.uom,
+      row.moq,
+      row.brand,
+      row.model
+    ].join(' ').toLowerCase();
+
+    if (search && searchArea.indexOf(search) === -1) return false;
+
+    return true;
+  });
+}
+
+function renderMaterialTable() {
+  const tbody = document.getElementById('materialTableBody');
+  const empty = document.getElementById('materialEmptyState');
+
+  if (!tbody || !empty) return;
+
+  tbody.innerHTML = '';
+
+  const rows = getFilteredMaterialRows();
+  setText('materialVisibleCount', rows.length + ' Items');
+
+  if (!rows.length) {
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+
+  rows.forEach(function(row) {
+    const tr = document.createElement('tr');
+
+    tr.innerHTML = `
+      <td><span class="badge ${String(row.goodsType).toUpperCase() === 'ASSET' ? 'badge-warning' : 'badge-success'}">${esc(row.goodsType)}</span></td>
+      <td>${esc(row.mainGroup)}</td>
+      <td>${esc(row.subGroup)}</td>
+      <td class="material-item-name"><b>${esc(row.itemName)}</b></td>
+      <td>${esc(row.uom)}</td>
+      <td class="cell-num">${esc(row.moq)}</td>
+      <td>${esc(row.brand)}</td>
+      <td>${esc(row.model)}</td>
+      <td class="material-action-cell">
+        <button class="btn btn-outline btn-sm" onclick="openMaterialModal(${row.rowNumber})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteMaterialRow(${row.rowNumber})">Delete</button>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+function openMaterialModal(rowNumber) {
+  installMaterialModal();
+  buildMaterialDatalists();
+
+  const row = rowNumber
+    ? materialRows.find(function(item) { return Number(item.rowNumber) === Number(rowNumber); })
+    : null;
+
+  setText('materialModalTitle', row ? 'Update Material' : 'Add Material');
+
+  setValue('matEditRowNumber', row ? row.rowNumber : '');
+  setValue('matGoodsType', row ? row.goodsType : 'CONSUMABLE');
+  setValue('matMainGroup', row ? row.mainGroup : '');
+  setValue('matSubGroup', row ? row.subGroup : '');
+  setValue('matItemName', row ? row.itemName : '');
+  setValue('matUom', row ? row.uom : 'NOS');
+  setValue('matMoq', row ? row.moq : '');
+  setValue('matBrand', row ? row.brand : '');
+  setValue('matModel', row ? row.model : '');
+
+  const modal = document.getElementById('materialEditModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeMaterialModal() {
+  const modal = document.getElementById('materialEditModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function saveMaterialForm() {
+  const payload = {
+    rowNumber: getValue('matEditRowNumber'),
+    goodsType: getValue('matGoodsType'),
+    mainGroup: getValue('matMainGroup'),
+    subGroup: getValue('matSubGroup'),
+    itemName: getValue('matItemName'),
+    uom: getValue('matUom'),
+    moq: getValue('matMoq'),
+    brand: getValue('matBrand'),
+    model: getValue('matModel')
+  };
+
+  if (!payload.goodsType) return alert('Goods Type select karein');
+  if (!payload.mainGroup) return alert('Main Group enter karein');
+  if (!payload.subGroup) return alert('Sub Group enter karein');
+  if (!payload.itemName) return alert('Item Name enter karein');
+  if (!payload.uom) return alert('UOM enter karein');
+
+  showLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      showLoading(false);
+      alert(response.message || 'Material saved successfully');
+
+      materialRows = response.rows || [];
+      materialFilters = response.filters || {};
+
+      renderMaterialStats(response.stats || {});
+      renderMaterialFilters();
+      renderMaterialTable();
+      buildMaterialDatalists();
+      closeMaterialModal();
+    })
+    .withFailureHandler(function(error) {
+      showLoading(false);
+      alert('Material save failed: ' + error.message);
+    })
+    .saveMaterialItem(payload);
+}
+
+function deleteMaterialRow(rowNumber) {
+  const row = materialRows.find(function(item) {
+    return Number(item.rowNumber) === Number(rowNumber);
+  });
+
+  if (!row) {
+    alert('Material row not found');
+    return;
+  }
+
+  const ok = confirm('Delete material?\\n\\n' + row.itemName + '\\n' + row.mainGroup + ' / ' + row.subGroup);
+  if (!ok) return;
+
+  showLoading(true);
+
+  google.script.run
+    .withSuccessHandler(function(response) {
+      showLoading(false);
+      alert(response.message || 'Material deleted successfully');
+
+      materialRows = response.rows || [];
+      materialFilters = response.filters || {};
+
+      renderMaterialStats(response.stats || {});
+      renderMaterialFilters();
+      renderMaterialTable();
+      buildMaterialDatalists();
+    })
+    .withFailureHandler(function(error) {
+      showLoading(false);
+      alert('Material delete failed: ' + error.message);
+    })
+    .deleteMaterialItem({
+      rowNumber: rowNumber
+    });
+}
+</script>

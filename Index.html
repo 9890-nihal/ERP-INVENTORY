@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Bootstrap 5 CSS (custom CSS override karega) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
+  <!-- Vue 3 CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+  <!-- Bootstrap 5 JS (optional plugins jaise collapse, modal) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/js/bootstrap.bundle.min.js"></script>
+  <!-- ERP Custom Styles (Bootstrap ko override karta hai) -->
+  <?!= include('Styles'); ?>
+
+</head>
+
+<body>
+
+  <div class="login-page" id="loginPage">
+    <div class="login-box">
+      <h1>ERP Login</h1>
+      <p>Material Management System</p>
+
+      <div class="error-msg" id="loginError"></div>
+
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="username" placeholder="Enter username">
+      </div>
+
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="password" placeholder="Enter password">
+      </div>
+
+      <button class="btn btn-primary w-100" onclick="login()">Login</button>
+
+      <div class="demo">
+        Demo Login: <b>admin</b> / <b>1234</b>
+      </div>
+    </div>
+  </div>
+
+  <div class="app" id="app">
+
+    <aside class="sidebar">
+      <div class="brand">
+        <h2>ERP</h2>
+        <span>Material Management</span>
+      </div>
+
+      <div class="menu">
+        <div class="menu-section-label">Operations</div>
+
+        <div class="menu-item active" id="menuOutward" onclick="showModule('outward')">
+          <span class="menu-icon">↗</span>
+          <span>Outward</span>
+        </div>
+
+        <div class="menu-item" id="menuInward" onclick="showModule('inward')">
+          <span class="menu-icon">↙</span>
+          <span>Inward</span>
+        </div>
+
+        <div class="menu-item" id="menuInventory" onclick="showModule('inventory')">
+          <span class="menu-icon">▣</span>
+          <span>Inventory</span>
+        </div>
+
+        <div class="menu-item" id="menuMaterial" onclick="showModule('material')">
+          <span class="menu-icon">▦</span>
+          <span>Material List</span>
+        </div>
+
+        <div class="menu-section-label">Analytics</div>
+
+        <div class="menu-group" id="reportsMenuGroup">
+          <div class="menu-item menu-parent" id="menuReports" onclick="toggleReportsMenu(event)">
+            <span class="menu-icon">▤</span>
+            <span>Reports</span>
+            <span class="menu-arrow" id="reportsMenuArrow">⌄</span>
+          </div>
+
+          <div class="submenu" id="reportsSubmenu">
+            <div class="submenu-item" id="reportSubDashboard" onclick="showReportsModule('dashboard')">
+              <span class="submenu-icon">01</span>
+              <span>Dashboard Summary</span>
+            </div>
+            <div class="submenu-item" id="reportSubStockSummary" onclick="showReportsModule('stockSummary')">
+              <span class="submenu-icon">02</span>
+              <span>Stock Summary</span>
+            </div>
+            <div class="submenu-item" id="reportSubReorder" onclick="showReportsModule('reorder')">
+              <span class="submenu-icon">03</span>
+              <span>Reorder Required</span>
+            </div>
+            <div class="submenu-item" id="reportSubItemLedger" onclick="showReportsModule('itemLedger')">
+              <span class="submenu-icon">04</span>
+              <span>Item Ledger</span>
+            </div>
+            <div class="submenu-item" id="reportSubInwardRegister" onclick="showReportsModule('inwardRegister')">
+              <span class="submenu-icon">05</span>
+              <span>Inward Register</span>
+            </div>
+            <div class="submenu-item" id="reportSubOutwardRegister" onclick="showReportsModule('outwardRegister')">
+              <span class="submenu-icon">06</span>
+              <span>Outward Register</span>
+            </div>
+            <div class="submenu-item" id="reportSubAssetSerial" onclick="showReportsModule('assetSerial')">
+              <span class="submenu-icon">07</span>
+              <span>Asset Serial Register</span>
+            </div>
+            <div class="submenu-item" id="reportSubException" onclick="showReportsModule('exception')">
+              <span class="submenu-icon">08</span>
+              <span>Exception Report</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <button id="mobileMenuBtn" onclick="toggleMobileSidebar()" title="Menu">&#9776;</button>
+        <div>
+          <h3 id="pageTitle">Outward</h3>
+          <span class="muted" id="pageSubtitle">Material issue request tracking</span>
+        </div>
+
+        <div>
+          <span class="muted" id="loggedUser">Admin</span>
+          <button class="btn btn-danger" onclick="logout()">Logout</button>
+        </div>
+      </div>
+
+      <div class="content">
+
+        <div class="loading" id="loadingBox">
+          Loading data from Google Sheet...
+        </div>
+
+        <!-- OUTWARD MODULE -->
+        <section id="outwardModule">
+
+          <div class="chip-grid">
+            <div class="chip">
+              <span>Total Requests</span>
+              <h2 id="outTotalCount">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Pending Requests</span>
+              <h2 id="outPendingCount">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Success Requests</span>
+              <h2 id="outSuccessCount">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Total Issue Qty</span>
+              <h2 id="outTotalIssueQty">0</h2>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Outward Request List</h3>
+
+              <div class="filters">
+                <input type="text" id="outSearchBox" placeholder="Search..." onkeyup="renderOutwardTable()">
+
+                <select id="outIssueFromFilter" onchange="renderOutwardTable()">
+                  <option value="">All Issue From</option>
+                  <option value="STORE">STORE</option>
+                  <option value="HOUSE">HOUSE</option>
+                </select>
+
+                <button class="btn btn-outline" onclick="loadOutwardData()">Refresh</button>
+              </div>
+            </div>
+
+            <div class="tabs">
+              <button class="tab active" id="outPendingTab" onclick="switchOutwardTab('pending')">
+                Pending Request
+              </button>
+
+              <button class="tab" id="outSuccessTab" onclick="switchOutwardTab('success')">
+                Success Request
+              </button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Transaction ID</th>
+                    <th>Date</th>
+                    <th>Location</th>
+                    <th>Purpose</th>
+                    <th>Head Person</th>
+                    <th>Technician</th>
+                    <th>Goods Type</th>
+                    <th>Main Group</th>
+                    <th>Sub Group</th>
+                    <th>Item Name</th>
+                    <th>Req Qty</th>
+                    <th>UOM</th>
+                    <th>Issue Date</th>
+                    <th>Issue Qty</th>
+                    <th>Issue From</th>
+                    <th>Stock Type</th>
+                    <th>Brand</th>
+                    <th>Serial Number</th>
+                    <th>DC / MI</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+
+                <tbody id="outwardTableBody"></tbody>
+              </table>
+
+              <div class="empty-state" id="outwardEmptyState">
+                No request found
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INWARD MODULE -->
+        <section id="inwardModule" style="display:none;">
+
+          <div class="chip-grid">
+            <div class="chip">
+              <span>Total Inward Entries</span>
+              <h2 id="inTotalEntries">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Today Entries</span>
+              <h2 id="inTodayEntries">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Asset Entries</span>
+              <h2 id="inAssetEntries">0</h2>
+            </div>
+
+            <div class="chip">
+              <span>Total Inward Qty</span>
+              <h2 id="inTotalQty">0</h2>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Inward Entry Form</h3>
+              <button class="btn btn-outline" onclick="loadInwardData()">Refresh Master</button>
+            </div>
+
+            <div class="form-body">
+
+              <div class="note">
+                Sheet2 se material data aayega. Save karne par entry Sheet3 me save hogi.
+              </div>
+
+              <div class="grid">
+
+                <div class="form-group">
+                  <label>Date</label>
+                  <input type="date" id="inDate">
+                </div>
+
+                <div class="form-group">
+                  <label>Main Group</label>
+                  <input list="inMainGroupList" id="inMainGroup" placeholder="Search Main Group" onchange="onInMainGroupChange()">
+                  <datalist id="inMainGroupList"></datalist>
+                </div>
+
+                <div class="form-group">
+                  <label>Sub Group</label>
+                  <input list="inSubGroupList" id="inSubGroup" placeholder="Search Sub Group" onchange="onInSubGroupChange()">
+                  <datalist id="inSubGroupList"></datalist>
+                </div>
+
+                <div class="form-group">
+                  <label>Brand</label>
+                  <input list="inBrandList" id="inBrand" placeholder="Search Brand" onchange="onInBrandChange()">
+                  <datalist id="inBrandList"></datalist>
+                </div>
+
+                <div class="form-group span-2">
+                  <label>Goods Description</label>
+                  <input list="inGoodsDescriptionList" id="inGoodsDescription" placeholder="Search Goods Description" onchange="onInGoodsDescriptionChange()">
+                  <datalist id="inGoodsDescriptionList"></datalist>
+                </div>
+
+                <div class="form-group">
+                  <label>Goods Type</label>
+                  <input type="text" id="inGoodsType" class="readonly" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label>UOM</label>
+                  <input type="text" id="inUom" class="readonly" readonly>
+                </div>
+
+                <div class="form-group">
+                  <label>Inward Qty</label>
+                  <input type="number" id="inInwardQty" placeholder="Enter Qty">
+                </div>
+
+                <div class="form-group">
+                  <label>Model</label>
+                  <input list="inModelList" id="inModel" placeholder="Select Model">
+                  <datalist id="inModelList"></datalist>
+                </div>
+
+                <div class="form-group">
+                  <label>Stock Type</label>
+                  <select id="inStockType">
+                    <option value="">Select Stock Type</option>
+                    <option value="REPAIRED">REPAIRED</option>
+                    <option value="NEW">NEW</option>
+                    <option value="OLD">OLD</option>
+                    <option value="FAULTY">FAULTY</option>
+                    <option value="SCRAP">SCRAP</option>
+                  </select>
+                </div>
+
+                <div class="form-group span-2" id="inSerialBox" style="display:none;">
+                  <label>Goods Serial Number</label>
+                  <input type="text" id="inGoodsSerialNumber" placeholder="Serial number">
+                </div>
+
+                <div class="form-group span-2">
+                  <label>Vendor Name / Person Name</label>
+                  <input list="inVendorList" type="text" id="inVendorName" placeholder="Vendor / Person Name">
+                  <datalist id="inVendorList"></datalist>
+                </div>
+
+                <div class="form-group span-2">
+                  <label>Location</label>
+                  <input list="inLocationList" type="text" id="inLocation" placeholder="Location">
+                  <datalist id="inLocationList"></datalist>
+                </div>
+
+                <div class="form-group span-2">
+                  <label>Delivery Challan / Invoice No</label>
+                  <input type="text" id="inDeliveryChallan" placeholder="DC / Invoice No">
+                </div>
+
+                <div class="form-group span-4">
+                  <label>Remark</label>
+                  <textarea id="inRemark" placeholder="Remark"></textarea>
+                </div>
+
+                <div class="form-group span-4 actions">
+                  <button class="btn btn-outline" onclick="clearInwardForm()">Clear</button>
+                  <button class="btn btn-primary" onclick="saveInwardForm()">Save Inward Entry</button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Recent Inward Entries</h3>
+              <span class="badge badge-success" id="inRecentCount">0 Entries</span>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Goods Type</th>
+                    <th>Main Group</th>
+                    <th>Sub Group</th>
+                    <th>Brand</th>
+                    <th>Goods Description</th>
+                    <th>UOM</th>
+                    <th>Inward Qty</th>
+                    <th>Model</th>
+                    <th>Stock Type</th>
+                    <th>Serial Number</th>
+                    <th>Vendor / Person</th>
+                    <th>Location</th>
+                    <th>DC / Invoice No</th>
+                    <th>Remark</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+
+                <tbody id="inwardTableBody"></tbody>
+              </table>
+
+              <div class="empty-state" id="inwardEmptyState">
+                No inward entry found
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INVENTORY MODULE -->
+        <section id="inventoryModule" style="display:none;">
+
+          <div class="chip-grid inventory-kpis">
+            <div class="chip">
+              <span>Total Items</span>
+              <h2 id="invTotalItems">0</h2>
+            </div>
+            <div class="chip">
+              <span>Current Stock Qty</span>
+              <h2 id="invCurrentQty">0</h2>
+            </div>
+            <div class="chip">
+              <span>Reorder Required</span>
+              <h2 id="invReorderRequired">0</h2>
+            </div>
+            <div class="chip">
+              <span>Inward / Outward</span>
+              <h2 id="invPeriodMovement">0 / 0</h2>
+            </div>
+          </div>
+
+          <div class="panel inventory-panel">
+            <div class="panel-header inventory-panel-header">
+              <div>
+                <h3>Inventory Stock Register</h3>
+                <div class="inventory-mini-strip">
+                  <span class="badge badge-warning" id="inventoryVisibleCount">0 Items</span>
+                  <span class="badge badge-danger">Negative Stock: <span id="invNegativeStock">0</span></span>
+                  <span class="muted">Period: <b id="inventoryPeriodLabel"></b></span>
+                  <span class="muted" id="inventoryDateRange"></span>
+                </div>
+              </div>
+
+              <div class="inventory-toolbar">
+                <input type="month" id="inventoryPeriod" onchange="loadInventoryData()">
+                <input type="text" id="inventorySearchBox" placeholder="Search item, group, brand..." onkeyup="renderInventoryTable()">
+                <input type="text" id="inventoryLocationFinder" placeholder="Storage location finder" onkeyup="renderInventoryTable()">
+                <select id="inventoryReorderFilter" onchange="renderInventoryTable()">
+                  <option value="">All Reorder Status</option>
+                  <option value="REORDER">Reorder Required</option>
+                  <option value="OK">Not Required</option>
+                </select>
+                <button class="btn btn-primary" onclick="loadInventoryData({syncSheet:true})">Refresh / Sync Sheet4</button>
+              </div>
+            </div>
+
+            <div class="inventory-view-tabs">
+              <button class="inventory-view-tab active" id="inventorySummaryTab" onclick="setInventoryView('summary')">
+                Summary View
+              </button>
+              <button class="inventory-view-tab" id="inventoryDetailTab" onclick="setInventoryView('detail')">
+                Movement Detail
+              </button>
+            </div>
+
+            <div class="table-wrap inventory-table-wrap">
+              <table class="inventory-table inventory-table-summary" id="inventoryDataTable">
+                <thead id="inventoryTableHead"></thead>
+                <tbody id="inventoryTableBody"></tbody>
+              </table>
+
+              <div class="empty-state" id="inventoryEmptyState">
+                No inventory item found
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MATERIAL LIST MODULE -->
+        <!-- Client_Material.html is dynamically filling this section -->
+        <section id="materialModule" style="display:none;">
+          <!-- Content dynamically installed by Client_Material.html installMaterialModuleShell() -->
+        </section>
+
+        <!-- REPORTS MODULE -->
+        <section id="reportsModule" style="display:none;">
+
+          <div class="reports-hero panel">
+            <div class="reports-hero-copy">
+              <span class="eyebrow">Corporate Analytics</span>
+              <h3>Reports Control Center</h3>
+              <p class="muted">ERP ke saare management, stock, inward, outward, asset aur exception reports ek professional control panel me.</p>
+            </div>
+
+            <div class="reports-hero-status">
+              <span class="badge badge-success">8 Reports</span>
+              <span class="badge badge-warning">Phase Wise Build</span>
+              <span class="muted">Auto-refresh compatible</span>
+            </div>
+          </div>
+
+          <div class="report-option-grid" id="reportOptionGrid"></div>
+
+          <div class="panel report-workspace">
+            <div class="report-workspace-header">
+              <div>
+                <span class="eyebrow" id="activeReportPhase">Phase 1</span>
+                <h3 id="activeReportTitle">Dashboard Summary</h3>
+                <p class="muted" id="activeReportDescription">Management overview and ERP health summary.</p>
+              </div>
+
+              <div class="report-actions">
+                <button class="btn btn-outline" onclick="printActiveReport()">Print / PDF</button>
+                <button class="btn btn-outline" onclick="exportActiveReportCsv()">Export CSV</button>
+              </div>
+            </div>
+
+            <div class="report-blueprint-grid">
+              <div class="report-blueprint-card">
+                <span>Purpose</span>
+                <p id="activeReportPurpose">Daily management visibility.</p>
+              </div>
+              <div class="report-blueprint-card">
+                <span>Data Source</span>
+                <p id="activeReportSource">Sheet1, Sheet2, Sheet3, Sheet4</p>
+              </div>
+              <div class="report-blueprint-card">
+                <span>Build Priority</span>
+                <p id="activeReportPriority">High</p>
+              </div>
+            </div>
+
+            <div class="report-preview-box">
+              <div class="report-preview-header">
+                <h4>Report Columns Blueprint</h4>
+                <span class="muted">Next phase me isi blueprint ke hisaab se live data table banega.</span>
+              </div>
+              <div class="report-column-tags" id="reportColumnTags"></div>
+            </div>
+          </div>
+        </section>
+
+
+
+      </div>
+    </main>
+  </div>
+
+  <!-- INWARD EDIT MODAL -->
+  <div class="modal-bg" id="inwardEditModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Edit Inward Entry</h3>
+        <button class="close-btn" onclick="closeInwardEditModal()">×</button>
+      </div>
+
+      <input type="hidden" id="inEditRowNumber">
+
+      <div class="grid">
+
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="inEditDate">
+        </div>
+
+        <div class="form-group">
+          <label>Goods Type</label>
+          <input type="text" id="inEditGoodsType" class="readonly" readonly>
+        </div>
+
+        <div class="form-group">
+          <label>Main Group</label>
+          <input type="text" id="inEditMainGroup" class="readonly" readonly>
+        </div>
+
+        <div class="form-group">
+          <label>Sub Group</label>
+          <input type="text" id="inEditSubGroup" class="readonly" readonly>
+        </div>
+
+        <div class="form-group">
+          <label>Brand</label>
+          <input type="text" id="inEditBrand" class="readonly" readonly>
+        </div>
+
+        <div class="form-group span-2">
+          <label>Goods Description</label>
+          <input type="text" id="inEditGoodsDescription" class="readonly" readonly>
+        </div>
+
+        <div class="form-group">
+          <label>UOM</label>
+          <input type="text" id="inEditUom" class="readonly" readonly>
+        </div>
+
+        <div class="form-group">
+          <label>Inward Qty</label>
+          <input type="number" id="inEditInwardQty">
+        </div>
+
+        <div class="form-group">
+          <label>Model</label>
+          <input type="text" id="inEditModel">
+        </div>
+
+        <div class="form-group">
+          <label>Stock Type</label>
+          <select id="inEditStockType">
+            <option value="">Select Stock Type</option>
+            <option value="REPAIRED">REPAIRED</option>
+            <option value="NEW">NEW</option>
+            <option value="OLD">OLD</option>
+            <option value="FAULTY">FAULTY</option>
+            <option value="SCRAP">SCRAP</option>
+          </select>
+        </div>
+
+        <div class="form-group span-2" id="inEditSerialBox">
+          <label>Goods Serial Number</label>
+          <input type="text" id="inEditGoodsSerialNumber">
+        </div>
+
+        <div class="form-group span-2">
+          <label>Vendor Name / Person Name</label>
+          <input list="inVendorList" type="text" id="inEditVendorName">
+        </div>
+
+        <div class="form-group span-2">
+          <label>Location</label>
+          <input list="inLocationList" type="text" id="inEditLocation">
+        </div>
+
+        <div class="form-group span-2">
+          <label>Delivery Challan / Invoice No</label>
+          <input type="text" id="inEditDeliveryChallan">
+        </div>
+
+        <div class="form-group span-4">
+          <label>Remark</label>
+          <textarea id="inEditRemark"></textarea>
+        </div>
+
+        <div class="form-group span-4 actions">
+          <button class="btn btn-outline" onclick="closeInwardEditModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="updateInwardForm()">Update Inward Entry</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- OUTWARD EDIT MODAL -->
+  <div class="modal-bg" id="outwardModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Update Issue Quantity</h3>
+        <button class="close-btn" onclick="closeOutwardModal()">×</button>
+      </div>
+
+      <input type="hidden" id="outEditRowNumber">
+
+      <div class="form-group">
+        <label>Transaction ID</label>
+        <input type="text" id="outEditTransactionId" disabled>
+      </div>
+
+      <div class="form-group">
+        <label>Item Name</label>
+        <input type="text" id="outEditItemName" disabled>
+      </div>
+
+      <div class="grid">
+        <div class="form-group">
+          <label>Requested Qty</label>
+          <input type="number" id="outEditReqQty" disabled>
+        </div>
+
+        <div class="form-group">
+          <label>Issue Qty</label>
+          <input type="number" id="outEditIssueQty">
+        </div>
+
+        <div class="form-group">
+          <label>Issue Date</label>
+          <input type="date" id="outEditIssueDate">
+        </div>
+
+        <div class="form-group">
+          <label>Issue From</label>
+          <select id="outEditIssueFrom">
+            <option value="">Select</option>
+            <option value="STORE">STORE</option>
+            <option value="HOUSE">HOUSE</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Stock Type</label>
+          <input list="outStockTypeList" id="outEditStockType" placeholder="Search / Select Stock Type" autocomplete="off">
+          <datalist id="outStockTypeList">
+            <option value="NEW"></option>
+            <option value="OLD"></option>
+            <option value="REPAIRED"></option>
+            <option value="FAULTY"></option>
+            <option value="SCRAP"></option>
+          </datalist>
+        </div>
+
+        <div class="form-group">
+          <label>Brand</label>
+          <input type="text" id="outEditBrand">
+        </div>
+
+        <div class="form-group">
+          <label>Serial Number</label>
+          <input type="text" id="outEditSerialNumber">
+        </div>
+
+        <div class="form-group">
+          <label>DC / MI</label>
+          <input type="text" id="outEditDcMi">
+        </div>
+
+        <div class="form-group actions span-4">
+          <button class="btn btn-outline" onclick="closeOutwardModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveOutwardIssue()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Mobile sidebar overlay -->
+  <div id="sidebarOverlay" onclick="closeMobileSidebar()"></div>
+
+  <?!= include('Client_Common'); ?>
+  <?!= include('Client_Outward'); ?>
+  <?!= include('Client_Inward'); ?>
+  <?!= include('Client_Inventory'); ?>
+  <?!= include('Client_Reports'); ?>
+  <?!= include('Client_Material'); ?>
+</body>
+</html>

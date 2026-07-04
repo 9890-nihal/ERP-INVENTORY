@@ -1,0 +1,547 @@
+<script>
+  let activeReportType = 'dashboard';
+  let activeReportData = null;
+  let reportsLoading = false;
+
+  const ERP_REPORTS = {
+    dashboard: {
+      id: '01',
+      title: 'Dashboard Summary',
+      phase: 'Phase 1',
+      priority: 'High',
+      source: 'Sheet1, Sheet2, Sheet3, Sheet4',
+      description: 'Management dashboard for ERP health, inward, outward, return, current stock and reorder summary.',
+      purpose: 'Daily owner/admin visibility.',
+      columns: ['Metric', 'Value', 'Detail', 'Status']
+    },
+    stockSummary: {
+      id: '02',
+      title: 'Stock Summary',
+      phase: 'Phase 1',
+      priority: 'High',
+      source: 'Sheet2 + Inventory Logic',
+      description: 'Opening, inward, outward and closing balance in a clean printable report.',
+      purpose: 'Monthly stock review and audit-ready stock position.',
+      columns: ['Goods Type', 'Main Group', 'Sub Group', 'Item Name', 'UOM', 'Brand', 'Model', 'Opening Stock', 'Inward', 'Outward', 'Closing Stock', 'Minimum Stock', 'Reorder Status', 'Storage Location']
+    },
+    reorder: {
+      id: '03',
+      title: 'Reorder Required',
+      phase: 'Phase 1',
+      priority: 'High',
+      source: 'Sheet2 / Sheet4 minimum qty + current stock',
+      description: 'Minimum stock qty ke against current stock check karke purchase/repair action report.',
+      purpose: 'Stock-out prevent karna aur timely purchasing trigger karna.',
+      columns: ['Goods Type', 'Main Group', 'Sub Group', 'Item Name', 'Brand', 'Model', 'Current Stock', 'Minimum Stock', 'Short Qty', 'Storage Location', 'Suggested Action']
+    },
+    itemLedger: {
+      id: '04',
+      title: 'Item Ledger',
+      phase: 'Phase 2',
+      priority: 'High',
+      source: 'Sheet1 + Sheet3',
+      description: 'Single item/full item movement history with inward, outward, return and running balance.',
+      purpose: 'Ek item ka complete movement trace karna.',
+      columns: ['Date', 'Transaction Type', 'Reference No', 'Item Name', 'Stock Type', 'Inward Qty', 'Outward Qty', 'Balance Qty', 'Location', 'Vendor / Issued To', 'Remark']
+    },
+    inwardRegister: {
+      id: '05',
+      title: 'Inward Register',
+      phase: 'Phase 1',
+      priority: 'Medium',
+      source: 'Sheet3',
+      description: 'Vendor/person, DC invoice, stock type and item-wise inward register.',
+      purpose: 'Purchase/inward verification and vendor-wise material tracking.',
+      columns: ['Date', 'Goods Type', 'Main Group', 'Sub Group', 'Brand', 'Item Name', 'UOM', 'Qty', 'Stock Type', 'Serial Number', 'Vendor / Person', 'Location', 'DC / Invoice No', 'Remark']
+    },
+    outwardRegister: {
+      id: '06',
+      title: 'Outward Register',
+      phase: 'Phase 1',
+      priority: 'Medium',
+      source: 'Sheet1',
+      description: 'Location, purpose, head person, technician and item-wise outward/return issue register.',
+      purpose: 'Consumption control, return tracking and issue accountability.',
+      columns: ['Transaction ID', 'Type', 'Linked Req ID', 'Date', 'Issue Date', 'Location', 'Purpose', 'Head Person', 'Technician', 'Item Name', 'Requested Qty', 'Issue Qty', 'Issue From', 'Stock Type', 'Serial Number', 'Status']
+    },
+    assetSerial: {
+      id: '07',
+      title: 'Asset Serial Register',
+      phase: 'Phase 2',
+      priority: 'Medium',
+      source: 'Sheet3 + Sheet1',
+      description: 'Asset goods type ke serial number based tracking report.',
+      purpose: 'Asset accountability and serial-level traceability.',
+      columns: ['Asset Item', 'Serial Number', 'Brand', 'Model', 'Inward Date', 'Vendor', 'Current Location', 'Issued To / Technician', 'Current Status', 'Last Reference']
+    },
+    exception: {
+      id: '08',
+      title: 'Exception Report',
+      phase: 'Phase 2',
+      priority: 'High',
+      source: 'Sheet1, Sheet2, Sheet3, Sheet4',
+      description: 'Data mistakes, blank fields, negative stock and control exceptions identify karega.',
+      purpose: 'Data cleanup, audit control and ERP accuracy improve karna.',
+      columns: ['Area', 'Exception Type', 'Item / Reference', 'Value', 'Suggested Fix']
+    }
+  };
+
+  const REPORT_SUBMENU_IDS = {
+    dashboard: 'reportSubDashboard',
+    stockSummary: 'reportSubStockSummary',
+    reorder: 'reportSubReorder',
+    itemLedger: 'reportSubItemLedger',
+    inwardRegister: 'reportSubInwardRegister',
+    outwardRegister: 'reportSubOutwardRegister',
+    assetSerial: 'reportSubAssetSerial',
+    exception: 'reportSubException'
+  };
+
+  const REPORT_FIELD_MAP = {
+    'Metric': 'metric',
+    'Value': 'value',
+    'Detail': 'detail',
+    'Status': 'status',
+    'Goods Type': 'goodsType',
+    'Main Group': 'mainGroup',
+    'Sub Group': 'subGroup',
+    'Item Name': 'itemName',
+    'UOM': 'uom',
+    'Brand': 'brand',
+    'Model': 'model',
+    'Opening Stock': 'openingStock',
+    'Inward': 'inward',
+    'Outward': 'outward',
+    'Closing Stock': 'closingStock',
+    'Minimum Stock': 'minimumStock',
+    'Reorder Status': 'reorderStatus',
+    'Storage Location': 'storageLocation',
+    'Current Stock': 'currentStock',
+    'Short Qty': 'shortQty',
+    'Suggested Action': 'suggestedAction',
+    'Date': 'date',
+    'Qty': 'qty',
+    'Stock Type': 'stockType',
+    'Serial Number': 'serialNumber',
+    'Vendor / Person': 'vendorPerson',
+    'Location': 'location',
+    'DC / Invoice No': 'dcInvoiceNo',
+    'Remark': 'remark',
+    'Transaction ID': 'transactionId',
+    'Type': 'type',
+    'Linked Req ID': 'linkedReqId',
+    'Issue Date': 'issueDate',
+    'Purpose': 'purpose',
+    'Head Person': 'headPerson',
+    'Technician': 'technician',
+    'Requested Qty': 'requestedQty',
+    'Issue Qty': 'issueQty',
+    'Issue From': 'issueFrom',
+    'DC / MI': 'dcMi',
+    'Status': 'status',
+    'Transaction Type': 'transactionType',
+    'Reference No': 'referenceNo',
+    'Inward Qty': 'inwardQty',
+    'Outward Qty': 'outwardQty',
+    'Balance Qty': 'balanceQty',
+    'Vendor / Issued To': 'party',
+    'Asset Item': 'assetItem',
+    'Inward Date': 'inwardDate',
+    'Vendor': 'vendor',
+    'Current Location': 'currentLocation',
+    'Issued To / Technician': 'issuedToTechnician',
+    'Current Status': 'currentStatus',
+    'Last Reference': 'lastReference',
+    'Area': 'area',
+    'Exception Type': 'exceptionType',
+    'Item / Reference': 'itemReference',
+    'Suggested Fix': 'suggestedFix'
+  };
+
+  function toggleReportsMenu(event) {
+    if (event) event.stopPropagation();
+
+    const submenu = document.getElementById('reportsSubmenu');
+    const isOpen = submenu && submenu.classList.contains('open');
+
+    if (isOpen) {
+      closeReportsMenuOnly();
+      return;
+    }
+
+    openReportsMenuOnly();
+    showReportsModule(activeReportType || 'dashboard');
+  }
+
+  function openReportsMenuOnly() {
+    const submenu = document.getElementById('reportsSubmenu');
+    const arrow = document.getElementById('reportsMenuArrow');
+    if (submenu) submenu.classList.add('open');
+    if (arrow) arrow.innerText = '⌃';
+  }
+
+  function closeReportsMenuOnly() {
+    const submenu = document.getElementById('reportsSubmenu');
+    const arrow = document.getElementById('reportsMenuArrow');
+    if (submenu) submenu.classList.remove('open');
+    if (arrow) arrow.innerText = '⌄';
+  }
+
+  function showReportsModule(reportType) {
+    activeReportType = ERP_REPORTS[reportType] ? reportType : 'dashboard';
+
+    if (typeof hideAllModules === 'function') hideAllModules();
+    if (typeof clearMainMenuActive === 'function') clearMainMenuActive();
+
+    const reportsSection = document.getElementById('reportsModule');
+    if (reportsSection) reportsSection.style.display = 'block';
+
+    const menuReports = document.getElementById('menuReports');
+    if (menuReports) menuReports.classList.add('active');
+
+    openReportsMenuOnly();
+    renderReportOptions();
+    renderActiveReportBlueprint();
+    loadActiveReportData();
+
+    setText('pageTitle', 'Reports');
+    setText('pageSubtitle', 'Management reports, stock analysis, item ledger and exception control');
+  }
+
+  function renderReportOptions() {
+    const box = document.getElementById('reportOptionGrid');
+    if (!box) return;
+
+    const keys = Object.keys(ERP_REPORTS);
+    box.innerHTML = keys.map(function(key) {
+      const report = ERP_REPORTS[key];
+      const active = key === activeReportType ? ' active' : '';
+      const phaseClass = report.phase === 'Phase 1' ? 'badge-success' : 'badge-warning';
+      return `
+        <button type="button" class="report-option-card${active}" onclick="showReportsModule('${key}')">
+          <div class="report-option-top">
+            <span class="report-option-id">${esc(report.id)}</span>
+            <span class="badge ${phaseClass}">${esc(report.phase)}</span>
+          </div>
+          <h4>${esc(report.title)}</h4>
+          <p>${esc(report.description)}</p>
+        </button>
+      `;
+    }).join('');
+
+    Object.keys(REPORT_SUBMENU_IDS).forEach(function(key) {
+      const item = document.getElementById(REPORT_SUBMENU_IDS[key]);
+      if (!item) return;
+      if (key === activeReportType) item.classList.add('active');
+      else item.classList.remove('active');
+    });
+  }
+
+  function renderActiveReportBlueprint() {
+    const report = ERP_REPORTS[activeReportType] || ERP_REPORTS.dashboard;
+
+    setText('activeReportPhase', report.phase);
+    setText('activeReportTitle', report.title);
+    setText('activeReportDescription', report.description);
+    setText('activeReportPurpose', report.purpose);
+    setText('activeReportSource', report.source);
+    setText('activeReportPriority', report.priority);
+
+    const previewTitle = document.querySelector('#reportsModule .report-preview-header h4');
+    const previewHint = document.querySelector('#reportsModule .report-preview-header .muted');
+    if (previewTitle) previewTitle.innerText = report.title + ' - Live Data';
+    if (previewHint) previewHint.innerText = 'Month, search, print and CSV export ready.';
+
+    const tags = document.getElementById('reportColumnTags');
+    if (tags) {
+      tags.classList.add('report-live-zone');
+      tags.innerHTML = `
+        <div class="report-live-filterbar">
+          <div class="report-filter-field">
+            <label>Report Month</label>
+            <input type="month" id="reportPeriod" onchange="loadActiveReportData()">
+          </div>
+          <div class="report-filter-field report-filter-search">
+            <label>Search</label>
+            <input type="text" id="reportSearch" placeholder="Search item, person, location, serial..." onkeyup="reportSearchKeyup(event)">
+          </div>
+          <div class="report-filter-actions">
+            <button class="btn btn-primary" onclick="loadActiveReportData()">Refresh Report</button>
+            <button class="btn btn-outline" onclick="clearReportFilters()">Clear</button>
+          </div>
+        </div>
+
+        <div class="report-live-meta" id="reportLiveMeta">
+          <span class="badge badge-warning">Loading...</span>
+        </div>
+
+        <div class="report-kpi-grid" id="reportKpiGrid"></div>
+
+        <div class="report-live-table-card">
+          <div class="report-table-titlebar">
+            <div>
+              <h4 id="reportLiveTableTitle">${esc(report.title)}</h4>
+              <span class="muted" id="reportLiveTableSubtitle">${esc(report.description)}</span>
+            </div>
+            <span class="badge badge-success" id="reportLiveCount">0 Records</span>
+          </div>
+          <div class="report-live-table-wrap">
+            <table class="report-live-table" id="reportLiveTable">
+              <thead id="reportLiveTableHead"></thead>
+              <tbody id="reportLiveTableBody"></tbody>
+            </table>
+            <div class="empty-state" id="reportLiveEmptyState">No report data found</div>
+          </div>
+        </div>
+      `;
+      setDefaultReportPeriod();
+    }
+  }
+
+  function setDefaultReportPeriod() {
+    const input = document.getElementById('reportPeriod');
+    if (!input || input.value) return;
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    input.value = yyyy + '-' + mm;
+  }
+
+  function reportSearchKeyup(event) {
+    if (event && event.key === 'Enter') {
+      loadActiveReportData();
+      return;
+    }
+    clearTimeout(window.reportSearchTimer);
+    window.reportSearchTimer = setTimeout(loadActiveReportData, 450);
+  }
+
+  function clearReportFilters() {
+    setValue('reportSearch', '');
+    setDefaultReportPeriod();
+    loadActiveReportData();
+  }
+
+  function getActiveReportFilters() {
+    setDefaultReportPeriod();
+    return {
+      period: getValue('reportPeriod'),
+      search: getValue('reportSearch')
+    };
+  }
+
+  function loadActiveReportData(options) {
+    options = options || {};
+    if (reportsLoading) return;
+
+    const silent = !!options.silent;
+    const finish = function() {
+      reportsLoading = false;
+      if (typeof options.onComplete === 'function') options.onComplete();
+    };
+
+    reportsLoading = true;
+    if (!silent) showLoading(true);
+    setReportMetaLoading();
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (!silent) showLoading(false);
+        activeReportData = response || {};
+        renderReportLiveData(activeReportData);
+        finish();
+      })
+      .withFailureHandler(function(error) {
+        if (!silent) {
+          showLoading(false);
+          alert('Report loading error: ' + error.message);
+        } else {
+          console.warn('Report auto refresh failed:', error.message);
+        }
+        setReportMetaError(error.message);
+        finish();
+      })
+      .getReportsInitialData(activeReportType, getActiveReportFilters());
+  }
+
+  function setReportMetaLoading() {
+    const meta = document.getElementById('reportLiveMeta');
+    if (meta) meta.innerHTML = '<span class="badge badge-warning">Loading live report...</span>';
+  }
+
+  function setReportMetaError(message) {
+    const meta = document.getElementById('reportLiveMeta');
+    if (meta) meta.innerHTML = '<span class="badge badge-danger">' + esc(message || 'Report failed') + '</span>';
+  }
+
+  function renderReportLiveData(data) {
+    data = data || {};
+    const report = ERP_REPORTS[activeReportType] || ERP_REPORTS.dashboard;
+    const rows = data.rows || [];
+    const columns = data.columns || report.columns || [];
+
+    setText('activeReportTitle', data.title || report.title);
+    setText('activeReportDescription', data.subtitle || report.description);
+
+    const meta = document.getElementById('reportLiveMeta');
+    if (meta) {
+      meta.innerHTML = `
+        <span class="badge badge-success">Live</span>
+        <span class="muted">Period: <b>${esc(data.periodLabel || '')}</b></span>
+        <span class="muted">Range: ${esc(data.fromDate || '')} to ${esc(data.toDate || '')}</span>
+        <span class="muted">Generated: ${esc(data.generatedAt || '')}</span>
+        <span class="muted">${esc(data.footerNote || '')}</span>
+      `;
+    }
+
+    setText('reportLiveTableTitle', data.title || report.title);
+    setText('reportLiveTableSubtitle', data.subtitle || report.description);
+    setText('reportLiveCount', rows.length + ' Records');
+
+    renderReportKpis(data.kpis || []);
+    renderReportTable(columns, rows);
+  }
+
+  function renderReportKpis(kpis) {
+    const grid = document.getElementById('reportKpiGrid');
+    if (!grid) return;
+
+    if (!kpis.length) {
+      grid.innerHTML = '';
+      return;
+    }
+
+    grid.innerHTML = kpis.map(function(kpi) {
+      return `
+        <div class="report-kpi-card">
+          <span>${esc(kpi.label)}</span>
+          <h3>${esc(formatReportValue(kpi.value))}</h3>
+          <small>${esc(kpi.hint || '')}</small>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderReportTable(columns, rows) {
+    const table = document.getElementById('reportLiveTable');
+    const thead = document.getElementById('reportLiveTableHead');
+    const tbody = document.getElementById('reportLiveTableBody');
+    const empty = document.getElementById('reportLiveEmptyState');
+    if (!table || !thead || !tbody || !empty) return;
+
+    thead.innerHTML = '<tr>' + columns.map(function(col) {
+      return '<th>' + esc(col) + '</th>';
+    }).join('') + '</tr>';
+
+    tbody.innerHTML = '';
+
+    if (!rows.length) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+
+    rows.slice(0, 700).forEach(function(row) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = columns.map(function(col) {
+        const field = REPORT_FIELD_MAP[col] || normalizeReportFieldName(col);
+        const value = row[field];
+        return '<td class="' + getReportCellClass(col, value) + '">' + formatReportCell(col, value) + '</td>';
+      }).join('');
+      tbody.appendChild(tr);
+    });
+  }
+
+  function getReportCellClass(col, value) {
+    const numericCols = ['Value', 'Opening Stock', 'Inward', 'Outward', 'Closing Stock', 'Minimum Stock', 'Current Stock', 'Short Qty', 'Qty', 'Requested Qty', 'Issue Qty', 'Inward Qty', 'Outward Qty', 'Balance Qty'];
+    if (numericCols.indexOf(col) !== -1) return 'report-cell-num';
+    if (col === 'Status' || col === 'Reorder Status' || col === 'Current Status' || col === 'Type') return 'report-cell-status';
+    return '';
+  }
+
+  function formatReportCell(col, value) {
+    if (value === null || value === undefined || value === '') return '<span class="muted">-</span>';
+
+    if (col === 'Status' || col === 'Reorder Status' || col === 'Current Status' || col === 'Type') {
+      return '<span class="badge ' + getReportBadgeClass(value) + '">' + esc(value) + '</span>';
+    }
+
+    return esc(formatReportValue(value));
+  }
+
+  function formatReportValue(value) {
+    if (typeof value === 'number') return value.toLocaleString('en-IN');
+    if (/^-?\d+(\.\d+)?$/.test(String(value))) return Number(value).toLocaleString('en-IN');
+    return value;
+  }
+
+  function getReportBadgeClass(value) {
+    const text = String(value || '').toUpperCase();
+    if (text.indexOf('REORDER') !== -1 || text.indexOf('PENDING') !== -1 || text.indexOf('ACTION') !== -1 || text.indexOf('ISSUED') !== -1) return 'badge-warning';
+    if (text.indexOf('CRITICAL') !== -1 || text.indexOf('NEGATIVE') !== -1 || text.indexOf('MISSING') !== -1) return 'badge-danger';
+    if (text.indexOf('RETURN') !== -1) return 'badge-warning';
+    return 'badge-success';
+  }
+
+  function normalizeReportFieldName(col) {
+    const text = String(col || '').trim();
+    return text.charAt(0).toLowerCase() + text.slice(1).replace(/\s+([a-zA-Z])/g, function(_, ch) {
+      return ch.toUpperCase();
+    }).replace(/[^a-zA-Z0-9]/g, '');
+  }
+
+  function refreshActiveReport(options) {
+    options = options || {};
+    if (getActiveModuleName && getActiveModuleName() !== 'reports') {
+      if (typeof options.onComplete === 'function') options.onComplete();
+      return;
+    }
+    loadActiveReportData({ silent: true, onComplete: options.onComplete });
+  }
+
+  function printActiveReport() {
+    if (!activeReportData) {
+      alert('Report data load hone ke baad print karein.');
+      return;
+    }
+    window.print();
+  }
+
+  function exportActiveReportCsv() {
+    if (!activeReportData || !activeReportData.rows) {
+      alert('Report data load hone ke baad export karein.');
+      return;
+    }
+
+    const report = ERP_REPORTS[activeReportType] || ERP_REPORTS.dashboard;
+    const columns = activeReportData.columns || report.columns || [];
+    const rows = activeReportData.rows || [];
+
+    const csv = [];
+    csv.push(columns.map(csvEscape).join(','));
+    rows.forEach(function(row) {
+      csv.push(columns.map(function(col) {
+        const field = REPORT_FIELD_MAP[col] || normalizeReportFieldName(col);
+        return csvEscape(row[field]);
+      }).join(','));
+    });
+
+    const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeTitle = String(report.title || 'Report').replace(/[^a-z0-9]+/gi, '_');
+    a.href = url;
+    a.download = safeTitle + '_' + (activeReportData.period || '') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function csvEscape(value) {
+    if (value === null || value === undefined) value = '';
+    const text = String(value).replace(/"/g, '""');
+    return '"' + text + '"';
+  }
+</script>

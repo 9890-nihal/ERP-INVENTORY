@@ -1,0 +1,1092 @@
+<script>
+/* =========================================================
+   CLIENT_OUTWARD - MATERIAL LIST EDIT + DELETE + WAREHOUSE
+   Replace full Client_Outward.html with this script block.
+========================================================= */
+
+(function outwardBootstrap() {
+  if (!Array.isArray(window.outwardRequests)) window.outwardRequests = [];
+  if (!window.outwardActiveTab) window.outwardActiveTab = 'pending';
+  if (!window.outwardExpandedGroups) window.outwardExpandedGroups = {};
+  if (!Array.isArray(window.outwardMasterData)) window.outwardMasterData = [];
+})();
+
+/* ---------------- Safe helpers ---------------- */
+function outEl(id) { return document.getElementById(id); }
+
+function outEsc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escAttr(value) { return outEsc(value); }
+
+function outNorm(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function outNormKey(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function outSetText(id, value) {
+  if (typeof setText === 'function') {
+    try { setText(id, value); return; } catch (e) {}
+  }
+  var el = outEl(id);
+  if (el) el.textContent = value === null || value === undefined ? '' : String(value);
+}
+
+function outSetValue(id, value) {
+  if (typeof setValue === 'function') {
+    try { setValue(id, value); return; } catch (e) {}
+  }
+  var el = outEl(id);
+  if (el) el.value = value === null || value === undefined ? '' : String(value);
+}
+
+function outGetValue(id) {
+  if (typeof getValue === 'function') {
+    try { return getValue(id); } catch (e) {}
+  }
+  var el = outEl(id);
+  return el ? String(el.value || '').trim() : '';
+}
+
+function outShowLoading(show) {
+  if (typeof showLoading === 'function') {
+    try { showLoading(show); return; } catch (e) {}
+  }
+}
+
+function outToInputDate(value) {
+  if (typeof toInputDate === 'function') {
+    try { return toInputDate(value); } catch (e) {}
+  }
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  var s = String(value).trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    var dd = ('0' + m[1]).slice(-2);
+    var mm = ('0' + m[2]).slice(-2);
+    var yy = m[3].length === 2 ? '20' + m[3] : m[3];
+    return yy + '-' + mm + '-' + dd;
+  }
+  var d = new Date(s);
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+function outClosest(target, selector) {
+  while (target && target !== document) {
+    if (target.matches && target.matches(selector)) return target;
+    target = target.parentNode;
+  }
+  return null;
+}
+
+function getNum(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  return Number(String(v).replace(/,/g, '')) || 0;
+}
+
+function fmtQty(v) {
+  var n = Number(v) || 0;
+  if (n === 0) return '-';
+  return n.toLocaleString('en-IN');
+}
+
+function uniq(arr) {
+  var seen = {}, out = [];
+  (arr || []).forEach(function(v) {
+    var raw = String(v || '').trim();
+    var key = raw.toUpperCase();
+    if (raw && !seen[key]) {
+      seen[key] = true;
+      out.push(raw);
+    }
+  });
+  return out.sort(function(a, b) { return a.localeCompare(b); });
+}
+
+function stockSel(cur, exp) {
+  return String(cur || '').toUpperCase() === String(exp || '').toUpperCase() ? ' selected' : '';
+}
+
+function getTxnId(row) { return String((row && row['Transaction_ID']) || '').trim(); }
+
+function getOutwardGroupKey(row) {
+  return getTxnId(row) || ('ROW_' + String((row && row.rowNumber) || ''));
+}
+
+function outSafeId(value) {
+  var str = String(value || '');
+  var hash = 0, i, chr;
+  for (i = 0; i < str.length; i++) {
+    chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return 'out_' + Math.abs(hash).toString(36);
+}
+
+function normalizeOutMaterialRow(row) {
+  row = row || {};
+  return {
+    rowNumber: row.rowNumber || '',
+    goodsType: String(row.goodsType || row['Goods Type'] || row['GOODS TYPE'] || '').trim(),
+    mainGroup: String(row.mainGroup || row['Main Group'] || row['MAIN GROUP'] || '').trim(),
+    subGroup: String(row.subGroup || row['Sub Group'] || row['SUB GROUP'] || '').trim(),
+    itemName: String(row.itemName || row.goodsDescription || row['Item Name'] || row['GOODS DESCRIPTION'] || row['Goods Description'] || '').trim(),
+    uom: String(row.uom || row['UOM'] || '').trim(),
+    brand: String(row.brand || row['Brand'] || row['BRAND'] || '').trim(),
+    model: String(row.model || row['Model'] || row['MODEL'] || '').trim()
+  };
+}
+
+function setOutwardMasterData(rows) {
+  window.outwardMasterData = (rows || []).map(normalizeOutMaterialRow).filter(function(row) {
+    return row.mainGroup || row.subGroup || row.itemName;
+  });
+}
+
+/* ---------------- CSS injection ---------------- */
+(function injectOutwardCSS() {
+  if (outEl('outwardMaterialEditStyle')) return;
+  var style = document.createElement('style');
+  style.id = 'outwardMaterialEditStyle';
+  style.textContent = [
+    '#outwardModule .table-wrap table th:last-child,#outwardModule .table-wrap table td:last-child{position:sticky;right:0;z-index:3;background:#fff;box-shadow:-2px 0 6px rgba(0,0,0,0.08)}',
+    '#outwardModule .table-wrap table thead th:last-child{background:#f4f7fb;z-index:4}',
+    '.outward-summary-row{background:#fff;border-bottom:1px solid #e5e7eb}.outward-summary-row:hover{background:#f8faff}.outward-return-row.outward-summary-row{background:#fffbf0}',
+    '.outward-txn-expand-cell{cursor:pointer;user-select:none}.outward-txn-expand-cell:hover .out-txn-main{color:var(--primary,#1e40af);text-decoration:underline}',
+    '.out-expand-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#e5e7eb;color:#374151;font-size:10px;font-weight:bold;margin-right:5px;vertical-align:middle;transition:background .15s}',
+    '.outward-txn-expand-cell:hover .out-expand-icon,.out-expand-icon.expanded{background:var(--primary,#1e40af);color:#fff}',
+    '.outward-detail-row{background:#f0f4ff}.outward-detail-row td{font-size:12px!important;padding:5px 8px!important;color:#374151}.outward-return-detail{background:#fffbf0!important}',
+    '.out-item-num{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--primary,#1e40af);color:#fff;font-size:10px;font-weight:bold;margin-right:5px}',
+    '.out-items-summary-line{font-size:11px;color:#6b7280;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.out-items-summary-line b{color:#1f2937}',
+    '.outward-action-cell{white-space:nowrap}',
+    '.outward-group-modal{max-width:1180px!important;width:94vw!important;max-height:92vh!important;height:auto!important;display:flex!important;flex-direction:column!important;padding:22px!important}',
+    '.outward-group-edit-wrap{overflow:auto;max-height:58vh;border:0;border-radius:14px;background:transparent;padding:0 2px}',
+    '.outward-group-edit-table{width:100%!important;min-width:0!important;border-collapse:separate!important;border-spacing:0!important}',
+    '.outward-group-edit-table thead{display:none!important}',
+    '.outward-group-edit-table tbody{display:block!important}.outward-group-edit-table tr{display:block!important;margin:0 0 14px!important;border:1px solid #dbe3ef!important;border-radius:16px!important;background:#fff!important;box-shadow:0 10px 26px rgba(15,23,42,.07)!important;overflow:visible!important}.outward-group-edit-table td{display:block!important;padding:0!important;border:0!important;background:transparent!important}',
+    '.outward-group-edit-table input,.outward-group-edit-table select{width:100%;min-width:0!important;font-size:12px;padding:9px 10px;border:1px solid #d1d5db;border-radius:9px;background:#fff}',
+    '.outward-group-edit-table input.readonly{background:#f3f4f6;color:#6b7280}',
+    '.outward-group-summary{display:flex;flex-wrap:wrap;gap:12px;padding:10px 14px;background:#f8faff;border-radius:8px;margin-bottom:14px;font-size:13px}.outward-group-summary div span{display:block;color:#6b7280;font-size:10px;font-weight:900;text-transform:uppercase}.outward-group-summary div b{display:block;color:#0f172a}',
+    '.out-edit-card{padding:14px!important}.out-edit-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #eef2f7;padding-bottom:10px;margin-bottom:12px}.out-edit-item-title b{display:block;font-size:14px;color:#0f172a;line-height:1.28}.out-edit-item-title span{display:block;margin-top:4px;font-size:12px;color:#64748b}.out-edit-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.out-edit-field label{display:block;font-size:11px;font-weight:900;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}.out-edit-field.span-2{grid-column:span 2}.out-edit-field.span-4{grid-column:span 4}.out-edit-card-actions{display:flex;gap:8px;align-items:center;white-space:nowrap}.out-edit-delete-note{display:none;color:#b91c1c;font-size:12px;font-weight:900;margin-top:4px}.out-delete-row .out-edit-delete-note{display:block}',
+    '.out-suggest-wrap{position:relative;min-width:160px}.out-suggest-list{display:none;position:absolute;left:0;right:0;top:100%;max-height:210px;overflow:auto;background:#fff;border:1px solid #bfdbfe;border-radius:9px;box-shadow:0 16px 35px rgba(15,23,42,.18);z-index:99999}.out-suggest-list.open{display:block}.out-suggest-option{padding:8px 10px;cursor:pointer;font-size:12px;color:#0f172a}.out-suggest-option:hover{background:#eff6ff}.out-suggest-empty{padding:8px 10px;font-size:12px;color:#64748b}',
+    '.out-delete-row{border-color:#fed7aa!important;background:#fff7ed!important}.out-delete-row .out-edit-card{background:#fff7ed!important}.out-delete-row input,.out-delete-row select{background:#fffaf5!important}',
+    '.out-material-hint{font-size:11px;color:#64748b;margin-top:4px}.out-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}.out-add-note{margin-top:10px;background:#fff7ed;color:#9a3412;padding:10px;border-radius:10px;font-size:13px}@media(max-width:1100px){.out-edit-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.out-edit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.out-edit-field.span-2,.out-edit-field.span-4{grid-column:span 2}.outward-group-modal{width:98vw!important;padding:16px!important}}@media(max-width:520px){.out-edit-grid{grid-template-columns:1fr}.out-edit-field.span-2,.out-edit-field.span-4{grid-column:span 1}.out-edit-card-head{flex-direction:column}}'
+  ].join('\n');
+  document.head.appendChild(style);
+})();
+
+/* ---------------- Init ---------------- */
+(function initOutwardEnhancements() {
+  setTimeout(function() {
+    ensureOutwardExtraTabs();
+    ensureOutwardGroupEditModal();
+    bindOutwardTableEvents();
+  }, 250);
+})();
+
+/* ---------------- Load ---------------- */
+function loadOutwardData(options) {
+  options = options || {};
+  var silent = !!options.silent;
+  var finish = function() {
+    if (typeof options.onComplete === 'function') options.onComplete();
+  };
+
+  ensureOutwardExtraTabs();
+  ensureOutwardGroupEditModal();
+  bindOutwardTableEvents();
+
+  if (!window.google || !google.script || !google.script.run) {
+    console.error('google.script.run not available. This must run inside Apps Script HtmlService.');
+    finish();
+    return;
+  }
+
+  if (!silent) outShowLoading(true);
+  google.script.run
+    .withSuccessHandler(function(response) {
+      window.outwardRequests = (response && response.requests) || [];
+      setOutwardMasterData((response && (response.masterData || response.materialRows)) || []);
+      ensureOutwardExtraTabs();
+      renderOutwardStats();
+      renderOutwardTable();
+
+      if (!window.outwardMasterData.length && google.script.run.getMaterialListInitialData) {
+        google.script.run
+          .withSuccessHandler(function(matResponse) {
+            setOutwardMasterData((matResponse && matResponse.rows) || []);
+            if (!silent) outShowLoading(false);
+            finish();
+          })
+          .withFailureHandler(function() {
+            if (!silent) outShowLoading(false);
+            finish();
+          })
+          .getMaterialListInitialData();
+      } else {
+        if (!silent) outShowLoading(false);
+        finish();
+      }
+    })
+    .withFailureHandler(function(error) {
+      if (!silent) {
+        outShowLoading(false);
+        alert('Outward data loading error: ' + ((error && error.message) || error));
+      } else {
+        console.warn('Outward auto refresh failed:', (error && error.message) || error);
+      }
+      finish();
+    })
+    .getOutwardData();
+}
+
+function refreshOutwardMaterialMaster(done) {
+  done = done || function(){};
+  if (!window.google || !google.script || !google.script.run || !google.script.run.getMaterialListInitialData) {
+    done();
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(response) {
+      setOutwardMasterData((response && response.rows) || []);
+      done();
+    })
+    .withFailureHandler(function(error) {
+      console.warn('Material master load failed:', (error && error.message) || error);
+      done();
+    })
+    .getMaterialListInitialData();
+}
+
+/* ---------------- Tabs ---------------- */
+function ensureOutwardExtraTabs() {
+  var pending = outEl('outPendingTab');
+  var success = outEl('outSuccessTab');
+  if (!pending || !success || !pending.parentElement) return;
+
+  var box = pending.parentElement;
+  if (!outEl('outReturnTab')) {
+    var returnTab = document.createElement('button');
+    returnTab.className = 'tab';
+    returnTab.id = 'outReturnTab';
+    returnTab.type = 'button';
+    returnTab.textContent = 'Return';
+    returnTab.setAttribute('data-outward-tab', 'return');
+    box.appendChild(returnTab);
+  }
+  if (!outEl('outPendingPartialTab')) {
+    var partialTab = document.createElement('button');
+    partialTab.className = 'tab';
+    partialTab.id = 'outPendingPartialTab';
+    partialTab.type = 'button';
+    partialTab.textContent = 'Partial';
+    partialTab.setAttribute('data-outward-tab', 'partial');
+    box.appendChild(partialTab);
+  }
+
+  ['outPendingTab', 'outSuccessTab'].forEach(function(id) {
+    var el = outEl(id);
+    if (el && !el.getAttribute('data-outward-tab')) {
+      el.setAttribute('data-outward-tab', id === 'outSuccessTab' ? 'success' : 'pending');
+    }
+  });
+
+  if (!box.getAttribute('data-outward-tabs-bound')) {
+    box.addEventListener('click', function(e) {
+      var tabBtn = outClosest(e.target, '[data-outward-tab]');
+      if (!tabBtn || !box.contains(tabBtn)) return;
+      switchOutwardTab(tabBtn.getAttribute('data-outward-tab'));
+    });
+    box.setAttribute('data-outward-tabs-bound', '1');
+  }
+}
+
+function switchOutwardTab(tabName) {
+  if (tabName === 'pendingPartial') tabName = 'partial';
+  if (tabName !== 'pending' && tabName !== 'success' && tabName !== 'return' && tabName !== 'partial') {
+    tabName = 'pending';
+  }
+  window.outwardActiveTab = tabName;
+
+  ['outPendingTab', 'outSuccessTab', 'outReturnTab', 'outPendingPartialTab'].forEach(function(id) {
+    var t = outEl(id);
+    if (t) t.classList.remove('active');
+  });
+
+  var activeId = tabName === 'success' ? 'outSuccessTab' :
+    tabName === 'return' ? 'outReturnTab' :
+    tabName === 'partial' ? 'outPendingPartialTab' : 'outPendingTab';
+  var active = outEl(activeId);
+  if (active) active.classList.add('active');
+
+  window.outwardExpandedGroups = {};
+  renderOutwardTable();
+}
+
+/* ---------------- Status helpers ---------------- */
+function outwardSheetType(row) {
+  return String((row && (row['Type'] || row['TYPE'])) || '').trim().toUpperCase();
+}
+
+function outwardManualStatus(row) {
+  return String((row && (row['ERP STATUS'] || row['ERP_STATUS'] || row['Manual Status'] || row['MANUAL STATUS'])) || '').trim().toUpperCase();
+}
+
+function isReturnRow(row) {
+  var type = outwardSheetType(row);
+  var id = String((row && row['Transaction_ID']) || '').toUpperCase();
+  var dc = String((row && row['DC / MI']) || '').toUpperCase();
+  return type === 'RETURNED' || type === 'RETURN' || id.indexOf('_RETURN_') !== -1 || dc === 'RETURN';
+}
+
+function getAgainstId(row) {
+  return String((row && (row['Linked_Req_ID'] || row['LINKED_REQ_ID'])) || '').trim();
+}
+
+function computedStatus(row) {
+  if (isReturnRow(row)) return 'RETURNED';
+  var reqQty = getNum(row && row['Quantity']);
+  var issueQty = getNum(row && row['Issue Qty']);
+  if (reqQty > 0 && issueQty >= reqQty) return 'SUCCESS';
+  if (issueQty > 0 && issueQty < reqQty) return 'PARTIAL';
+  return 'PENDING';
+}
+
+function getOutwardStatus(row) {
+  if (isReturnRow(row)) return 'RETURNED';
+  var manual = outwardManualStatus(row);
+  if (manual === 'PENDING' || manual === 'PARTIAL' || manual === 'SUCCESS') return manual;
+  return computedStatus(row);
+}
+
+function groupStatus(items) {
+  items = items || [];
+  if (!items.length) return 'PENDING';
+  var statuses = items.map(function(row) { return getOutwardStatus(row); });
+  if (statuses.every(function(s) { return s === 'RETURNED'; })) return 'RETURNED';
+  if (statuses.every(function(s) { return s === 'SUCCESS'; })) return 'SUCCESS';
+  if (statuses.some(function(s) { return s === 'PARTIAL' || s === 'SUCCESS'; })) return 'PARTIAL';
+  return 'PENDING';
+}
+
+function statusBadge(status) {
+  if (status === 'RETURNED') return '<span class="badge badge-warning">RETURNED</span>';
+  if (status === 'SUCCESS') return '<span class="badge badge-success">SUCCESS</span>';
+  if (status === 'PARTIAL') return '<span class="badge badge-warning">PARTIAL</span>';
+  return '<span class="badge badge-danger">PENDING</span>';
+}
+
+/* ---------------- Groups and filters ---------------- */
+function buildGroups(rows) {
+  var map = {}, groups = [];
+  (rows || []).forEach(function(row) {
+    var id = getOutwardGroupKey(row);
+    if (!map[id]) {
+      map[id] = { transactionId: id, displayTransactionId: getTxnId(row) || id, first: row, items: [] };
+      groups.push(map[id]);
+    }
+    map[id].items.push(row);
+  });
+  return groups;
+}
+
+function getFilteredOutwardRows() {
+  var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
+  if (window.outwardActiveTab === 'pendingPartial') window.outwardActiveTab = 'partial';
+
+  var searchBox = outEl('outSearchBox');
+  var issueFromFilter = outEl('outIssueFromFilter');
+  var search = searchBox ? String(searchBox.value || '').toLowerCase().trim() : '';
+  var issueFrom = issueFromFilter ? String(issueFromFilter.value || '').trim() : '';
+
+  return requests.filter(function(row) {
+    var status = getOutwardStatus(row);
+    var isReturn = isReturnRow(row);
+
+    if (window.outwardActiveTab === 'return' && !isReturn) return false;
+    if (window.outwardActiveTab !== 'return' && isReturn) return false;
+    if (window.outwardActiveTab === 'pending' && status !== 'PENDING') return false;
+    if (window.outwardActiveTab === 'success' && status !== 'SUCCESS') return false;
+    if (window.outwardActiveTab === 'partial' && status !== 'PARTIAL') return false;
+    if (issueFrom && String(row['Issue From'] || '').trim() !== issueFrom) return false;
+    if (!search) return true;
+
+    var haystack = [
+      row['Transaction_ID'], row['System_Key'], row['Type'], row['Date'], row['Location'], row['Purpose'],
+      row['Head_Person'], row['Technician'], row['Asset_Reason'], row['Linked_Req_ID'], row['Goods_Type'], row['GOODS TYPE'],
+      row['Main_Group'], row['MAIN GROUP'], row['Sub_Group'], row['SUB GROUP'], row['Item_Name'], row['GOODS DESCRIPTION'],
+      row['Quantity'], row['UOM'], row['Issue Date'], row['Issue Qty'], row['Issue From'], row['STOCK TYPE'], row['Stock Type'],
+      row['Brand'], row['Model'], row['Serial Number'], row['DC / MI'], row['ERP STATUS']
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(search) !== -1;
+  });
+}
+
+/* ---------------- Stats ---------------- */
+function renderOutwardStats() {
+  var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
+  var normal = requests.filter(function(row) { return !isReturnRow(row); });
+  var pending = normal.filter(function(row) { return getOutwardStatus(row) === 'PENDING'; }).length;
+  var success = normal.filter(function(row) { return getOutwardStatus(row) === 'SUCCESS'; }).length;
+  var partial = normal.filter(function(row) { return getOutwardStatus(row) === 'PARTIAL'; }).length;
+  var totalIssueQty = normal.reduce(function(sum, row) { return sum + getNum(row['Issue Qty']); }, 0);
+  var returnCount = requests.filter(function(row) { return isReturnRow(row); }).length;
+
+  outSetText('outTotalCount', normal.length);
+  outSetText('outPendingCount', pending);
+  outSetText('outSuccessCount', success);
+  outSetText('outTotalIssueQty', totalIssueQty);
+
+  var returnTab = outEl('outReturnTab');
+  if (returnTab) returnTab.textContent = 'Return (' + returnCount + ')';
+  var partialTab = outEl('outPendingPartialTab');
+  if (partialTab) partialTab.textContent = 'Partial (' + partial + ')';
+}
+
+/* ---------------- Main table render ---------------- */
+function renderOutwardTable() {
+  ensureOutwardExtraTabs();
+  ensureOutwardGroupEditModal();
+
+  var tbody = outEl('outwardTableBody');
+  var empty = outEl('outwardEmptyState');
+  if (!tbody || !empty) return;
+
+  tbody.innerHTML = '';
+  bindOutwardTableEvents();
+
+  var groups = buildGroups(getFilteredOutwardRows());
+  if (!groups.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  var fragment = document.createDocumentFragment();
+
+  groups.forEach(function(group) {
+    var txnKey = group.transactionId;
+    var txnDisplay = group.displayTransactionId || txnKey;
+    var gid = outSafeId(txnKey);
+    var isExpanded = !!window.outwardExpandedGroups[txnKey];
+    var isReturn = isReturnRow(group.first);
+    var items = group.items || [];
+    var first = group.first || {};
+    var totalReqQty = items.reduce(function(sum, row) { return sum + getNum(row['Quantity']); }, 0);
+    var totalIssueQty = items.reduce(function(sum, row) { return sum + getNum(row['Issue Qty']); }, 0);
+
+    var preview = items.slice(0, 3).map(function(row) {
+      return '<div class="out-items-summary-line"><b>' + outEsc(row['Item_Name']) + '</b> - ' + outEsc(row['UOM']) + '</div>';
+    }).join('');
+    if (items.length > 3) {
+      preview += '<div class="out-items-summary-line" style="color:#9ca3af;">+' + (items.length - 3) + ' more</div>';
+    }
+
+    var expandIcon = '<span class="out-expand-icon' + (isExpanded ? ' expanded' : '') + '" id="outExpIcon_' + gid + '">' + (isExpanded ? '▼' : '▶') + '</span>';
+    var returnAgainst = window.outwardActiveTab === 'return' ? '<div style="font-size:11px;color:#9ca3af;">Against: ' + outEsc(getAgainstId(first)) + '</div>' : '';
+    var assetReason = first['Asset_Reason'] && first['Asset_Reason'] !== 'N/A' ? '<div style="font-size:11px;color:#9ca3af;">Reason: ' + outEsc(first['Asset_Reason']) + '</div>' : '';
+
+    var summaryRow = document.createElement('tr');
+    summaryRow.className = 'outward-group-row outward-summary-row' + (isReturn ? ' outward-return-row' : '');
+    summaryRow.innerHTML =
+      '<td>' + statusBadge(groupStatus(items)) + '</td>' +
+      '<td class="outward-txn-expand-cell" data-txn-id="' + escAttr(txnKey) + '" title="Click to expand items">' +
+        expandIcon +
+        '<span class="out-txn-main outward-transaction-main">' + outEsc(txnDisplay) + '</span>' +
+        '<div style="font-size:11px;color:#9ca3af;padding-left:23px;">' + items.length + ' item' + (items.length > 1 ? 's' : '') + ' - Click to expand</div>' +
+        returnAgainst +
+      '</td>' +
+      '<td>' + outEsc(first['Date']) + '</td>' +
+      '<td>' + outEsc(first['Location']) + '</td>' +
+      '<td>' + outEsc(first['Purpose']) + assetReason + '</td>' +
+      '<td>' + outEsc(first['Head_Person']) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Technician']; })).join(', ')) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Goods_Type'] || row['GOODS TYPE']; })).join(', ')) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Main_Group'] || row['MAIN GROUP']; })).join(', ')) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Sub_Group'] || row['SUB GROUP']; })).join(', ')) + '</td>' +
+      '<td>' + preview + '</td>' +
+      '<td><b>' + fmtQty(totalReqQty) + '</b></td>' +
+      '<td>' + outEsc(first['UOM']) + '</td>' +
+      '<td>' + outEsc(first['Issue Date']) + '</td>' +
+      '<td><b>' + fmtQty(totalIssueQty) + '</b></td>' +
+      '<td>' + outEsc(first['Issue From']) + '</td>' +
+      '<td>' + outEsc(first['STOCK TYPE'] || first['Stock Type']) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Brand']; })).join(', ')) + '</td>' +
+      '<td>' + outEsc(uniq(items.map(function(row) { return row['Serial Number']; })).join(', ')) + '</td>' +
+      '<td>' + outEsc(first['DC / MI']) + '</td>' +
+      '<td class="outward-action-cell"><button type="button" class="btn btn-primary btn-sm" data-action="edit-group" data-txn-id="' + escAttr(txnKey) + '">Edit Group</button></td>';
+    fragment.appendChild(summaryRow);
+
+    items.forEach(function(row, index) {
+      var status = getOutwardStatus(row);
+      var detailRow = document.createElement('tr');
+      detailRow.className = 'outward-detail-row out-detail-' + gid + (isReturn ? ' outward-return-detail' : '');
+      detailRow.style.display = isExpanded ? '' : 'none';
+      detailRow.innerHTML =
+        '<td colspan="2" style="padding-left:28px !important;">' +
+          '<span class="out-item-num">' + (index + 1) + '</span>' +
+          '<b style="font-size:12px;">' + outEsc(row['Item_Name']) + '</b>' +
+          '<span style="font-size:11px;color:#6b7280;margin-left:5px;">' + outEsc(row['Main_Group']) + ' / ' + outEsc(row['Sub_Group']) + '</span>' +
+        '</td>' +
+        '<td>' + outEsc(row['Date']) + '</td>' +
+        '<td>' + outEsc(row['Location']) + '</td>' +
+        '<td>' + outEsc(row['Purpose']) + '</td>' +
+        '<td>' + outEsc(row['Head_Person']) + '</td>' +
+        '<td>' + outEsc(row['Technician']) + '</td>' +
+        '<td>' + outEsc(row['Goods_Type'] || row['GOODS TYPE']) + '</td>' +
+        '<td>' + outEsc(row['Main_Group'] || row['MAIN GROUP']) + '</td>' +
+        '<td>' + outEsc(row['Sub_Group'] || row['SUB GROUP']) + '</td>' +
+        '<td>' + outEsc(row['Item_Name']) + '</td>' +
+        '<td style="text-align:right;font-weight:bold;">' + fmtQty(getNum(row['Quantity'])) + '</td>' +
+        '<td>' + outEsc(row['UOM']) + '</td>' +
+        '<td>' + outEsc(row['Issue Date']) + '</td>' +
+        '<td style="text-align:right;font-weight:bold;">' + fmtQty(getNum(row['Issue Qty'])) + '</td>' +
+        '<td>' + outEsc(row['Issue From']) + '</td>' +
+        '<td>' + outEsc(row['STOCK TYPE'] || row['Stock Type']) + '</td>' +
+        '<td>' + outEsc(row['Brand']) + '</td>' +
+        '<td>' + outEsc(row['Serial Number']) + '</td>' +
+        '<td>' + outEsc(row['DC / MI']) + '</td>' +
+        '<td class="outward-action-cell">' + statusBadge(status) + '</td>';
+      fragment.appendChild(detailRow);
+    });
+  });
+
+  tbody.appendChild(fragment);
+}
+
+function bindOutwardTableEvents() {
+  var tbody = outEl('outwardTableBody');
+  if (!tbody || tbody.getAttribute('data-outward-events-bound')) return;
+
+  tbody.addEventListener('click', function(e) {
+    var editBtn = outClosest(e.target, '[data-action="edit-group"]');
+    if (editBtn && tbody.contains(editBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      openOutwardGroupEdit(editBtn.getAttribute('data-txn-id'));
+      return;
+    }
+
+    var cell = outClosest(e.target, '.outward-txn-expand-cell');
+    if (cell && tbody.contains(cell)) {
+      e.preventDefault();
+      toggleOutwardGroup(cell.getAttribute('data-txn-id'));
+    }
+  });
+
+  tbody.setAttribute('data-outward-events-bound', '1');
+}
+
+function toggleOutwardGroup(txnId) {
+  var key = String(txnId || '');
+  window.outwardExpandedGroups[key] = !window.outwardExpandedGroups[key];
+  var gid = outSafeId(key);
+  var icon = outEl('outExpIcon_' + gid);
+  var expanded = !!window.outwardExpandedGroups[key];
+  if (icon) {
+    icon.textContent = expanded ? '▼' : '▶';
+    if (expanded) icon.classList.add('expanded');
+    else icon.classList.remove('expanded');
+  }
+  var rows = document.querySelectorAll('.out-detail-' + gid);
+  Array.prototype.forEach.call(rows, function(row) {
+    row.style.display = expanded ? '' : 'none';
+  });
+}
+
+/* ---------------- Group edit modal ---------------- */
+function ensureOutwardGroupEditModal() {
+  if (outEl('outwardGroupEditModal')) return;
+
+  var modal = document.createElement('div');
+  modal.className = 'modal-bg';
+  modal.id = 'outwardGroupEditModal';
+  modal.innerHTML =
+    '<div class="modal outward-group-modal" role="dialog" aria-modal="true" aria-labelledby="outGroupModalTitle">' +
+      '<div class="modal-header">' +
+        '<div><h3 id="outGroupModalTitle">Edit Transaction Items</h3><span class="muted" id="outGroupModalSubtitle"></span></div>' +
+        '<button type="button" class="close-btn" data-action="close-outward-group">&#215;</button>' +
+      '</div>' +
+      '<input type="hidden" id="outGroupTransactionId">' +
+      '<div class="outward-group-summary" id="outGroupSummary"></div>' +
+      '<div class="outward-group-edit-wrap">' +
+        '<table class="outward-group-edit-table">' +
+          '<thead><tr>' +
+            '<th>Item</th><th>Main Group</th><th>Sub Group</th><th>Brand</th><th>Goods Description</th>' +
+            '<th>Goods Type</th><th>UOM</th><th>Model</th><th>Req Qty</th><th>Issue Qty</th>' +
+            '<th>Issue Date</th><th>Issue From</th><th>Stock Type</th><th>Serial No.</th><th>DC / MI</th><th>Status</th><th>Delete</th>' +
+          '</tr></thead>' +
+          '<tbody id="outGroupEditBody"></tbody>' +
+        '</table>' +
+      '</div>' +
+      '<div class="out-add-note">Material List se item select karo. Galat item ko Delete mark karke Save All Items karo. Issue From me STORE, HOUSE, WAREHOUSE available hai.</div>' +
+      '<div class="out-modal-actions">' +
+        '<button type="button" class="btn btn-outline" data-action="refresh-outward-master">Refresh Material List</button>' +
+        '<button type="button" class="btn btn-outline" data-action="close-outward-group">Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-action="save-outward-group">Save All Items</button>' +
+      '</div>' +
+    '</div>';
+
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeOutwardGroupEditModal();
+      return;
+    }
+    var closeBtn = outClosest(e.target, '[data-action="close-outward-group"]');
+    if (closeBtn && modal.contains(closeBtn)) {
+      closeOutwardGroupEditModal();
+      return;
+    }
+    var saveBtn = outClosest(e.target, '[data-action="save-outward-group"]');
+    if (saveBtn && modal.contains(saveBtn)) {
+      saveOutwardGroupEdit();
+      return;
+    }
+    var refreshBtn = outClosest(e.target, '[data-action="refresh-outward-master"]');
+    if (refreshBtn && modal.contains(refreshBtn)) {
+      outShowLoading(true);
+      refreshOutwardMaterialMaster(function() {
+        outShowLoading(false);
+        var txnId = outGetValue('outGroupTransactionId');
+        if (txnId) openOutwardGroupEdit(txnId, true);
+      });
+    }
+  });
+
+  document.body.appendChild(modal);
+}
+
+function openOutwardGroupEdit(transactionId, keepModal) {
+  ensureOutwardGroupEditModal();
+  var key = String(transactionId || '');
+  var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
+  var items = requests.filter(function(row) { return getOutwardGroupKey(row) === key; });
+
+  if (!items.length) {
+    alert('Transaction items not found.\nTransaction ID: ' + key + '\nPlease refresh and try again.');
+    return;
+  }
+
+  var first = items[0] || {};
+  outSetValue('outGroupTransactionId', key);
+  outSetText('outGroupModalSubtitle', (getTxnId(first) || key) + ' - ' + items.length + ' item' + (items.length > 1 ? 's' : ''));
+
+  var summary = outEl('outGroupSummary');
+  if (summary) {
+    summary.innerHTML =
+      '<div><span>Location</span><b>' + outEsc(first['Location']) + '</b></div>' +
+      '<div><span>Purpose</span><b>' + outEsc(first['Purpose']) + '</b></div>' +
+      '<div><span>Head Person</span><b>' + outEsc(first['Head_Person']) + '</b></div>' +
+      '<div><span>Technician</span><b>' + outEsc(first['Technician']) + '</b></div>';
+  }
+
+  var tbody = outEl('outGroupEditBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = items.map(function(row, index) {
+    var stockType = row['STOCK TYPE'] || row['Stock Type'] || '';
+    var status = getOutwardStatus(row);
+    var mainGroup = row['Main_Group'] || row['MAIN GROUP'] || '';
+    var subGroup = row['Sub_Group'] || row['SUB GROUP'] || '';
+    var brand = row['Brand'] || '';
+    var itemName = row['Item_Name'] || row['GOODS DESCRIPTION'] || '';
+    var goodsType = row['Goods_Type'] || row['GOODS TYPE'] || '';
+    var model = row['Model'] || row['MODEL'] || '';
+    var returnBadge = isReturnRow(row) ? '<span class="badge badge-warning">RETURN</span>' : '';
+    return '<tr data-row-index="' + index + '" data-row-number="' + escAttr(String(row.rowNumber || '')) + '">' +
+      '<td colspan="17">' +
+        '<div class="out-edit-card">' +
+          '<div class="out-edit-card-head">' +
+            '<div class="out-edit-item-title">' +
+              '<b>Item ' + (index + 1) + ': ' + outEsc(itemName || 'Select Item') + '</b>' +
+              '<span>' + outEsc(mainGroup || '-') + ' / ' + outEsc(subGroup || '-') + (brand ? ' / ' + outEsc(brand) : '') + '</span>' +
+              returnBadge +
+              '<div class="out-edit-delete-note">DELETE MARKED - Save All Items par ye item delete hoga</div>' +
+            '</div>' +
+            '<div class="out-edit-card-actions">' +
+              '<button type="button" class="btn btn-danger btn-sm" onclick="markOutwardItemDelete(' + index + ')">Delete Item</button>' +
+              '<input type="hidden" id="grpDelete_' + index + '" value="NO">' +
+            '</div>' +
+          '</div>' +
+          '<div class="out-edit-grid">' +
+            '<div class="out-edit-field"><label>Main Group</label>' + outSuggestInputHtml('grpMainGroup_' + index, mainGroup, 'Search Main Group') + '</div>' +
+            '<div class="out-edit-field"><label>Sub Group</label>' + outSuggestInputHtml('grpSubGroup_' + index, subGroup, 'Search Sub Group') + '</div>' +
+            '<div class="out-edit-field"><label>Brand</label>' + outSuggestInputHtml('grpBrand_' + index, brand, 'Search Brand') + '</div>' +
+            '<div class="out-edit-field"><label>Goods Description</label>' + outSuggestInputHtml('grpItemName_' + index, itemName, 'Search Goods Description') + '</div>' +
+            '<div class="out-edit-field"><label>Goods Type</label><input type="text" class="readonly" readonly id="grpGoodsType_' + index + '" value="' + escAttr(goodsType) + '"></div>' +
+            '<div class="out-edit-field"><label>UOM</label><input type="text" class="readonly" readonly id="grpUom_' + index + '" value="' + escAttr(row['UOM'] || '') + '"></div>' +
+            '<div class="out-edit-field"><label>Model</label><input type="text" class="readonly" readonly id="grpModel_' + index + '" value="' + escAttr(model) + '"></div>' +
+            '<div class="out-edit-field"><label>Req Qty</label><input type="number" min="0" id="grpReqQty_' + index + '" value="' + escAttr(String(getNum(row['Quantity']) || '')) + '"></div>' +
+            '<div class="out-edit-field"><label>Issue Qty</label><input type="number" min="0" id="grpIssueQty_' + index + '" value="' + escAttr(String(getNum(row['Issue Qty']) || '')) + '"></div>' +
+            '<div class="out-edit-field"><label>Issue Date</label><input type="date" id="grpIssueDate_' + index + '" value="' + escAttr(outToInputDate(row['Issue Date'])) + '"></div>' +
+            '<div class="out-edit-field"><label>Issue From</label><select id="grpIssueFrom_' + index + '"><option value="">Select</option>' +
+              '<option value="STORE"' + stockSel(row['Issue From'], 'STORE') + '>STORE</option>' +
+              '<option value="HOUSE"' + stockSel(row['Issue From'], 'HOUSE') + '>HOUSE</option>' +
+              '<option value="WAREHOUSE"' + stockSel(row['Issue From'], 'WAREHOUSE') + '>WAREHOUSE</option>' +
+            '</select></div>' +
+            '<div class="out-edit-field"><label>Stock Type</label><select id="grpStockType_' + index + '"><option value="">Select</option>' +
+              '<option value="NEW"' + stockSel(stockType, 'NEW') + '>NEW</option>' +
+              '<option value="OLD"' + stockSel(stockType, 'OLD') + '>OLD</option>' +
+              '<option value="REPAIRED"' + stockSel(stockType, 'REPAIRED') + '>REPAIRED</option>' +
+              '<option value="FAULTY"' + stockSel(stockType, 'FAULTY') + '>FAULTY</option>' +
+              '<option value="SCRAP"' + stockSel(stockType, 'SCRAP') + '>SCRAP</option>' +
+            '</select></div>' +
+            '<div class="out-edit-field"><label>Serial No.</label><input type="text" id="grpSerial_' + index + '" value="' + escAttr(row['Serial Number'] || '') + '"></div>' +
+            '<div class="out-edit-field"><label>DC / MI</label><input type="text" id="grpDcMi_' + index + '" value="' + escAttr(row['DC / MI'] || '') + '"></div>' +
+            '<div class="out-edit-field"><label>Status</label><select id="grpStatus_' + index + '"' + (isReturnRow(row) ? ' disabled' : '') + '>' +
+              '<option value="PENDING"' + (status === 'PENDING' ? ' selected' : '') + '>PENDING</option>' +
+              '<option value="PARTIAL"' + (status === 'PARTIAL' ? ' selected' : '') + '>PARTIAL</option>' +
+              '<option value="SUCCESS"' + (status === 'SUCCESS' ? ' selected' : '') + '>SUCCESS</option>' +
+            '</select></div>' +
+          '</div>' +
+        '</div>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+
+  items.forEach(function(row, index) {
+    bindOutwardMaterialSuggests(index);
+    outApplyMaterialSelection(index, false);
+  });
+
+  var modal = outEl('outwardGroupEditModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    var wrap = outEl('outGroupEditBody');
+    var scroller = document.querySelector('#outwardGroupEditModal .outward-group-edit-wrap');
+    if (scroller) scroller.scrollTop = 0;
+  }
+}
+
+function outSuggestInputHtml(id, value, placeholder) {
+  return '<div class="out-suggest-wrap">' +
+    '<input type="text" id="' + id + '" value="' + escAttr(value || '') + '" placeholder="' + escAttr(placeholder || '') + '" autocomplete="off">' +
+    '<div class="out-suggest-list" id="' + id + '_list"></div>' +
+  '</div>';
+}
+
+function bindOutwardMaterialSuggests(index) {
+  var map = [
+    { id: 'grpMainGroup_' + index, type: 'mainGroup' },
+    { id: 'grpSubGroup_' + index, type: 'subGroup' },
+    { id: 'grpBrand_' + index, type: 'brand' },
+    { id: 'grpItemName_' + index, type: 'itemName' }
+  ];
+
+  map.forEach(function(item) {
+    var input = outEl(item.id);
+    if (!input || input.getAttribute('data-suggest-bound')) return;
+
+    input.addEventListener('focus', function() { showOutwardSuggest(index, item.type); });
+    input.addEventListener('click', function() { showOutwardSuggest(index, item.type); });
+    input.addEventListener('input', function() {
+      if (item.type === 'mainGroup') {
+        outSetValue('grpSubGroup_' + index, '');
+        outSetValue('grpBrand_' + index, '');
+        outSetValue('grpItemName_' + index, '');
+        outSetValue('grpGoodsType_' + index, '');
+        outSetValue('grpUom_' + index, '');
+        outSetValue('grpModel_' + index, '');
+      }
+      if (item.type === 'subGroup') {
+        outSetValue('grpBrand_' + index, '');
+        outSetValue('grpItemName_' + index, '');
+        outSetValue('grpGoodsType_' + index, '');
+        outSetValue('grpUom_' + index, '');
+        outSetValue('grpModel_' + index, '');
+      }
+      if (item.type === 'brand') {
+        outSetValue('grpItemName_' + index, '');
+        outSetValue('grpGoodsType_' + index, '');
+        outSetValue('grpUom_' + index, '');
+        outSetValue('grpModel_' + index, '');
+      }
+      if (item.type === 'itemName') outApplyMaterialSelection(index, false);
+      showOutwardSuggest(index, item.type);
+    });
+    input.addEventListener('blur', function() {
+      setTimeout(function() { closeOutwardSuggest(item.id); }, 180);
+    });
+    input.setAttribute('data-suggest-bound', 'yes');
+  });
+}
+
+function getOutwardSuggestValues(index, type) {
+  var rows = window.outwardMasterData || [];
+  var mainGroup = outGetValue('grpMainGroup_' + index);
+  var subGroup = outGetValue('grpSubGroup_' + index);
+  var brand = outGetValue('grpBrand_' + index);
+
+  var filtered = rows.filter(function(row) {
+    if (type !== 'mainGroup' && mainGroup && outNorm(row.mainGroup) !== outNorm(mainGroup)) return false;
+    if ((type === 'brand' || type === 'itemName') && subGroup && outNorm(row.subGroup) !== outNorm(subGroup)) return false;
+    if (type === 'itemName' && brand && outNorm(row.brand) !== outNorm(brand)) return false;
+    return true;
+  });
+
+  if (type === 'mainGroup') return uniq(rows.map(function(row) { return row.mainGroup; }));
+  if (type === 'subGroup') return uniq(filtered.map(function(row) { return row.subGroup; }));
+  if (type === 'brand') return uniq(filtered.map(function(row) { return row.brand; }));
+  return uniq(filtered.map(function(row) { return row.itemName; }));
+}
+
+function showOutwardSuggest(index, type) {
+  var id = type === 'mainGroup' ? 'grpMainGroup_' + index :
+    type === 'subGroup' ? 'grpSubGroup_' + index :
+    type === 'brand' ? 'grpBrand_' + index : 'grpItemName_' + index;
+  var input = outEl(id);
+  var list = outEl(id + '_list');
+  if (!input || !list) return;
+
+  var search = outNorm(input.value);
+  var values = getOutwardSuggestValues(index, type).filter(function(value) {
+    return !search || outNorm(value).indexOf(search) !== -1;
+  });
+
+  if (!values.length) {
+    list.innerHTML = '<div class="out-suggest-empty">No match found</div>';
+  } else {
+    list.innerHTML = values.slice(0, 150).map(function(value) {
+      return '<div class="out-suggest-option" data-value="' + escAttr(value) + '">' + outEsc(value) + '</div>';
+    }).join('');
+  }
+
+  list.classList.add('open');
+  Array.prototype.forEach.call(list.querySelectorAll('.out-suggest-option'), function(option) {
+    option.onclick = function() {
+      var value = option.getAttribute('data-value') || '';
+      input.value = value;
+      list.classList.remove('open');
+      if (type === 'mainGroup') {
+        outSetValue('grpSubGroup_' + index, '');
+        outSetValue('grpBrand_' + index, '');
+        outSetValue('grpItemName_' + index, '');
+      }
+      if (type === 'subGroup') {
+        outSetValue('grpBrand_' + index, '');
+        outSetValue('grpItemName_' + index, '');
+      }
+      if (type === 'brand') {
+        outSetValue('grpItemName_' + index, '');
+      }
+      outApplyMaterialSelection(index, true);
+    };
+  });
+}
+
+function closeOutwardSuggest(id) {
+  var list = outEl(id + '_list');
+  if (list) list.classList.remove('open');
+}
+
+function outFindSelectedMaterial(index) {
+  var mainGroup = outGetValue('grpMainGroup_' + index);
+  var subGroup = outGetValue('grpSubGroup_' + index);
+  var brand = outGetValue('grpBrand_' + index);
+  var itemName = outGetValue('grpItemName_' + index);
+
+  return (window.outwardMasterData || []).find(function(row) {
+    return outNorm(row.mainGroup) === outNorm(mainGroup) &&
+      outNorm(row.subGroup) === outNorm(subGroup) &&
+      outNorm(row.brand) === outNorm(brand) &&
+      outNorm(row.itemName) === outNorm(itemName);
+  }) || null;
+}
+
+function outApplyMaterialSelection(index, notify) {
+  var selected = outFindSelectedMaterial(index);
+  if (selected) {
+    outSetValue('grpGoodsType_' + index, selected.goodsType || '');
+    outSetValue('grpUom_' + index, selected.uom || '');
+    outSetValue('grpModel_' + index, selected.model || 'Not Available');
+    return true;
+  }
+
+  var mainGroup = outGetValue('grpMainGroup_' + index);
+  var subGroup = outGetValue('grpSubGroup_' + index);
+  var brand = outGetValue('grpBrand_' + index);
+  var itemName = outGetValue('grpItemName_' + index);
+
+  var filtered = (window.outwardMasterData || []).filter(function(row) {
+    if (mainGroup && outNorm(row.mainGroup) !== outNorm(mainGroup)) return false;
+    if (subGroup && outNorm(row.subGroup) !== outNorm(subGroup)) return false;
+    if (brand && outNorm(row.brand) !== outNorm(brand)) return false;
+    if (itemName && outNorm(row.itemName) !== outNorm(itemName)) return false;
+    return true;
+  });
+
+  if (filtered.length === 1) {
+    outSetValue('grpGoodsType_' + index, filtered[0].goodsType || '');
+    outSetValue('grpUom_' + index, filtered[0].uom || '');
+    outSetValue('grpModel_' + index, filtered[0].model || 'Not Available');
+    return true;
+  }
+
+  if (itemName) {
+    outSetValue('grpGoodsType_' + index, '');
+    outSetValue('grpUom_' + index, '');
+    outSetValue('grpModel_' + index, '');
+  }
+  return false;
+}
+
+function markOutwardItemDelete(index) {
+  var hidden = outEl('grpDelete_' + index);
+  var row = hidden ? outClosest(hidden, 'tr') : null;
+  if (!hidden || !row) return;
+  var current = hidden.value === 'YES';
+  hidden.value = current ? 'NO' : 'YES';
+  if (current) row.classList.remove('out-delete-row');
+  else row.classList.add('out-delete-row');
+}
+
+function closeOutwardGroupEditModal() {
+  var modal = outEl('outwardGroupEditModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function saveOutwardGroupEdit() {
+  var txnId = outGetValue('outGroupTransactionId');
+  var rows = document.querySelectorAll('#outGroupEditBody tr');
+  if (!txnId || !rows.length) return alert('No items to update');
+
+  var items = [];
+  var invalid = null;
+  var deleteCount = 0;
+
+  Array.prototype.forEach.call(rows, function(row) {
+    var index = Number(row.getAttribute('data-row-index'));
+    var deleteRow = outGetValue('grpDelete_' + index) === 'YES';
+    if (deleteRow) deleteCount++;
+
+    var reqQty = outGetValue('grpReqQty_' + index);
+    var issueQty = outGetValue('grpIssueQty_' + index);
+    var mainGroup = outGetValue('grpMainGroup_' + index);
+    var subGroup = outGetValue('grpSubGroup_' + index);
+    var brand = outGetValue('grpBrand_' + index);
+    var itemName = outGetValue('grpItemName_' + index);
+    var goodsType = outGetValue('grpGoodsType_' + index);
+    var uom = outGetValue('grpUom_' + index);
+
+    if (!deleteRow) {
+      if (!mainGroup) invalid = 'Main Group required hai.';
+      else if (!subGroup) invalid = 'Sub Group required hai.';
+      else if (!itemName) invalid = 'Goods Description required hai.';
+      else if (!goodsType || !uom) invalid = 'Material List se valid item select karein. Goods Type aur UOM autofill hona chahiye.';
+      else if (reqQty !== '' && Number(reqQty) < 0) invalid = 'Req Qty negative nahi ho sakti.';
+      else if (issueQty !== '' && Number(issueQty) < 0) invalid = 'Issue Qty negative nahi ho sakti.';
+    }
+
+    items.push({
+      rowNumber: row.getAttribute('data-row-number'),
+      deleteRow: deleteRow,
+      goodsType: goodsType,
+      mainGroup: mainGroup,
+      subGroup: subGroup,
+      brand: brand,
+      itemName: itemName,
+      uom: uom,
+      model: outGetValue('grpModel_' + index),
+      quantity: reqQty,
+      issueQty: issueQty,
+      issueDate: outGetValue('grpIssueDate_' + index),
+      issueFrom: outGetValue('grpIssueFrom_' + index),
+      stockType: outGetValue('grpStockType_' + index),
+      serialNumber: outGetValue('grpSerial_' + index),
+      dcMi: outGetValue('grpDcMi_' + index),
+      status: outGetValue('grpStatus_' + index)
+    });
+  });
+
+  if (invalid) return alert(invalid);
+  if (deleteCount && deleteCount === rows.length) {
+    var allOk = confirm('Is transaction ke sabhi items delete ho jayenge. Continue?');
+    if (!allOk) return;
+  } else if (deleteCount) {
+    var ok = confirm(deleteCount + ' item delete mark hai. Save karne par sheet se delete ho jayega. Continue?');
+    if (!ok) return;
+  }
+
+  if (!window.google || !google.script || !google.script.run) return alert('Apps Script connection not available');
+
+  outShowLoading(true);
+  google.script.run
+    .withSuccessHandler(function(response) {
+      outShowLoading(false);
+      alert((response && response.message) || 'Transaction updated');
+      closeOutwardGroupEditModal();
+      window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
+      setOutwardMasterData((response && (response.masterData || response.materialRows)) || window.outwardMasterData || []);
+      ensureOutwardExtraTabs();
+      renderOutwardStats();
+      renderOutwardTable();
+    })
+    .withFailureHandler(function(error) {
+      outShowLoading(false);
+      alert('Group update failed: ' + ((error && error.message) || error));
+    })
+    .updateOutwardGroupIssue({ transactionId: txnId, items: items });
+}
+
+/* ---------------- Single row edit compatibility ---------------- */
+function openOutwardEdit(rowNumber) {
+  var requests = Array.isArray(window.outwardRequests) ? window.outwardRequests : [];
+  var row = requests.find(function(item) { return Number(item.rowNumber) === Number(rowNumber); });
+  if (!row) return alert('Row not found');
+  openOutwardGroupEdit(getOutwardGroupKey(row));
+}
+
+function closeOutwardModal() {
+  var modal = outEl('outwardModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function saveOutwardIssue() {
+  var payload = {
+    rowNumber: outGetValue('outEditRowNumber'),
+    issueQty: outGetValue('outEditIssueQty'),
+    issueDate: outGetValue('outEditIssueDate'),
+    issueFrom: outGetValue('outEditIssueFrom'),
+    stockType: outGetValue('outEditStockType'),
+    brand: outGetValue('outEditBrand'),
+    serialNumber: outGetValue('outEditSerialNumber'),
+    dcMi: outGetValue('outEditDcMi')
+  };
+
+  if (!payload.issueQty) return alert('Issue Qty enter karein');
+  if (!payload.stockType) return alert('Stock Type select karein');
+  if (!window.google || !google.script || !google.script.run) return alert('Apps Script connection not available');
+
+  outShowLoading(true);
+  google.script.run
+    .withSuccessHandler(function(response) {
+      outShowLoading(false);
+      alert((response && response.message) || 'Updated');
+      closeOutwardModal();
+      window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
+      renderOutwardStats();
+      renderOutwardTable();
+    })
+    .withFailureHandler(function(error) {
+      outShowLoading(false);
+      alert('Update failed: ' + ((error && error.message) || error));
+    })
+    .updateOutwardIssue(payload);
+}
+</script>
