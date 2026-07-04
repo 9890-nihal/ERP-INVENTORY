@@ -1114,31 +1114,42 @@ function proceedSaveOutwardGroupEdit(txnId, items, saveBtn, originalText) {
     return;
   }
 
-  outShowLoading(true);
+  // Popup turant band, save background me chalega
+  closeOutwardGroupEditModal();
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = originalText;
+  }
+
+  Swal.fire({
+    toast: true,
+    position: 'bottom-end',
+    icon: 'info',
+    title: 'Saving in background...',
+    showConfirmButton: false,
+    timer: 3500,
+    timerProgressBar: true
+  });
+
   google.script.run
     .withSuccessHandler(function(response) {
-      outShowLoading(false);
-      if (saveBtn) {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = originalText;
-      }
+      window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
+      setOutwardMasterData((response && (response.masterData || response.materialRows)) || window.outwardMasterData || []);
+      ensureOutwardExtraTabs();
+      renderOutwardStats();
+      renderOutwardTable();
 
-      Swal.fire('Success', (response && response.message) || 'Transaction items updated successfully.', 'success')
-        .then(() => {
-          closeOutwardGroupEditModal();
-          window.outwardRequests = (response && response.requests) || window.outwardRequests || [];
-          setOutwardMasterData((response && (response.masterData || response.materialRows)) || window.outwardMasterData || []);
-          ensureOutwardExtraTabs();
-          renderOutwardStats();
-          renderOutwardTable();
-        });
+      Swal.fire({
+        toast: true,
+        position: 'bottom-end',
+        icon: 'success',
+        title: (response && response.message) || 'Transaction items updated successfully.',
+        showConfirmButton: false,
+        timer: 3500,
+        timerProgressBar: true
+      });
     })
     .withFailureHandler(function(error) {
-      outShowLoading(false);
-      if (saveBtn) {
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = originalText;
-      }
       Swal.fire('Error', 'Group update failed: ' + ((error && error.message) || error), 'error');
     })
     .updateOutwardGroupIssue({ transactionId: txnId, items: items });

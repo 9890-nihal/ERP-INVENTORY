@@ -104,6 +104,60 @@ function buildDashboardReport_(periodInfo, filters) {
   };
 }
 
+function getOutwardMovementChartData(filters) {
+  filters = filters || {};
+
+  const outward = getReportOutwardRows_();
+
+  // Date range: agar From/To diya hai to wahi use karo, warna current month
+  let startDate, endDate;
+  if (filters.fromDate) startDate = parseReportDate_(filters.fromDate);
+  if (filters.toDate) {
+    endDate = parseReportDate_(filters.toDate);
+    if (endDate) endDate = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() + 1);
+  }
+  if (!startDate || !endDate) {
+    const periodInfo = getReportPeriodInfo_(filters.period);
+    startDate = periodInfo.start;
+    endDate = periodInfo.end;
+  }
+
+  const locationFilter = cleanReportValue_(filters.location);
+
+  const filtered = outward.filter(function(row) {
+    if (row.isReturn) return false; // sirf issued items, return exclude
+    if (!isReportDateInRange_(row.movementDateObj, startDate, endDate)) return false;
+    if (locationFilter && locationFilter !== 'ALL' && cleanReportValue_(row.location) !== locationFilter) return false;
+    return true;
+  });
+
+  const totals = {};
+  filtered.forEach(function(row) {
+    const person = row.headPerson || 'Not Specified';
+    totals[person] = (totals[person] || 0) + (Number(row.issueQty) || 0);
+  });
+
+  const sortedPersons = Object.keys(totals).sort(function(a, b) {
+    return totals[b] - totals[a];
+  });
+
+  const locationsSet = {};
+  outward.forEach(function(row) {
+    if (row.location) locationsSet[row.location] = true;
+  });
+
+  return {
+    success: true,
+    labels: sortedPersons,
+    data: sortedPersons.map(function(p) { return totals[p]; }),
+    locations: Object.keys(locationsSet).sort(),
+    totalIssueQty: filtered.reduce(function(sum, row) { return sum + (Number(row.issueQty) || 0); }, 0),
+    totalTransactions: filtered.length,
+    fromDate: formatReportDate_(startDate),
+    toDate: formatReportDate_(new Date(endDate.getTime() - 24 * 60 * 60 * 1000))
+  };
+}
+
 function buildStockSummaryReport_(periodInfo, filters) {
   const inventory = getReportInventoryData_(periodInfo.period);
   const search = normalizeReportSearch_(filters.search);

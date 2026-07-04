@@ -277,6 +277,40 @@
 
         <div class="report-kpi-grid" id="reportKpiGrid"></div>
 
+        ${activeReportType === 'dashboard' ? `
+        <div class="report-live-table-card" id="outwardMovementChartCard">
+          <div class="report-table-titlebar">
+            <div>
+              <h4>Outward Movement - Head Person Wise (Issue Qty)</h4>
+              <span class="muted">Kis head person ne kitna item liya, date range aur location filter ke saath.</span>
+            </div>
+          </div>
+          <div class="report-live-filterbar">
+            <div class="report-filter-field">
+              <label>From Date</label>
+              <input type="date" id="movementFromDate" onchange="loadOutwardMovementChart()">
+            </div>
+            <div class="report-filter-field">
+              <label>To Date</label>
+              <input type="date" id="movementToDate" onchange="loadOutwardMovementChart()">
+            </div>
+            <div class="report-filter-field">
+              <label>Location</label>
+              <select id="movementLocation" onchange="loadOutwardMovementChart()">
+                <option value="ALL">All Locations</option>
+              </select>
+            </div>
+            <div class="report-filter-actions">
+              <button class="btn btn-outline" onclick="clearOutwardMovementFilters()">Clear</button>
+            </div>
+          </div>
+          <div class="report-live-meta" id="movementChartMeta"></div>
+          <div style="position:relative; height:360px; padding:10px;">
+            <canvas id="outwardMovementChart"></canvas>
+          </div>
+        </div>
+        ` : ''}
+
         <div class="report-live-table-card">
           <div class="report-table-titlebar">
             <div>
@@ -295,7 +329,127 @@
         </div>
       `;
       setDefaultReportPeriod();
+
+      if (activeReportType === 'dashboard') {
+        setDefaultMovementDates();
+        loadOutwardMovementChart();
+      }
     }
+  }
+
+  let outwardMovementChartInstance = null;
+
+  function formatDateForInput_(date) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
+  function setDefaultMovementDates() {
+    const fromInput = document.getElementById('movementFromDate');
+    const toInput = document.getElementById('movementToDate');
+    if (!fromInput || !toInput) return;
+    if (fromInput.value && toInput.value) return;
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    fromInput.value = formatDateForInput_(firstDay);
+    toInput.value = formatDateForInput_(today);
+  }
+
+  function clearOutwardMovementFilters() {
+    const fromInput = document.getElementById('movementFromDate');
+    const toInput = document.getElementById('movementToDate');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    setDefaultMovementDates();
+    const locationSelect = document.getElementById('movementLocation');
+    if (locationSelect) locationSelect.value = 'ALL';
+    loadOutwardMovementChart();
+  }
+
+  function loadOutwardMovementChart() {
+    if (activeReportType !== 'dashboard') return;
+    if (!window.google || !google.script || !google.script.run) return;
+
+    setDefaultMovementDates();
+
+    const filters = {
+      fromDate: getValue('movementFromDate'),
+      toDate: getValue('movementToDate'),
+      location: getValue('movementLocation')
+    };
+
+    const meta = document.getElementById('movementChartMeta');
+    if (meta) meta.innerHTML = '<span class="badge badge-warning">Loading chart...</span>';
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        renderOutwardMovementChart(response || {});
+      })
+      .withFailureHandler(function(error) {
+        if (meta) meta.innerHTML = '<span class="badge badge-danger">' + esc((error && error.message) || 'Chart load failed') + '</span>';
+      })
+      .getOutwardMovementChartData(filters);
+  }
+
+  function renderOutwardMovementChart(data) {
+    const canvas = document.getElementById('outwardMovementChart');
+    const meta = document.getElementById('movementChartMeta');
+    const locationSelect = document.getElementById('movementLocation');
+    if (!canvas) return;
+
+    if (locationSelect && Array.isArray(data.locations) && locationSelect.dataset.filled !== '1') {
+      const currentValue = locationSelect.value || 'ALL';
+      locationSelect.innerHTML = '<option value="ALL">All Locations</option>' +
+        data.locations.map(function(loc) {
+          return '<option value="' + esc(loc) + '">' + esc(loc) + '</option>';
+        }).join('');
+      locationSelect.value = currentValue;
+      locationSelect.dataset.filled = '1';
+    }
+
+    if (meta) {
+      meta.innerHTML = '<span class="badge badge-success">Live</span>' +
+        '<span class="muted">Range: ' + esc(data.fromDate || '') + ' to ' + esc(data.toDate || '') + '</span>' +
+        '<span class="muted">Total Issue Qty: <b>' + esc(formatReportValue(data.totalIssueQty || 0)) + '</b></span>' +
+        '<span class="muted">Transactions: <b>' + esc(data.totalTransactions || 0) + '</b></span>';
+    }
+
+    const labels = data.labels || [];
+    const values = data.data || [];
+
+    if (outwardMovementChartInstance) {
+      outwardMovementChartInstance.destroy();
+      outwardMovementChartInstance = null;
+    }
+
+    if (!labels.length || typeof Chart === 'undefined') return;
+
+    outwardMovementChartInstance = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Issue Qty',
+          data: values,
+          backgroundColor: '#2563eb',
+          borderRadius: 6,
+          maxBarThickness: 46
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { mode: 'index', intersect: false }
+        },
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0 } }
+        }
+      }
+    });
   }
 
   function setDefaultReportPeriod() {
