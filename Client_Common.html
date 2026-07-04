@@ -1,370 +1,360 @@
 <script>
-  let loggedUserName = 'Store Admin';
-  const ERP_AUTO_REFRESH_MS = 10000;
-  let erpAutoRefreshTimer = null;
-  let erpAutoRefreshRunning = false;
+let loggedUserName = 'Store Admin';
+const ERP_AUTO_REFRESH_MS = 10000;
+let erpAutoRefreshTimer = null;
+let erpAutoRefreshRunning = false;
+let outwardRequests = [];
+let outwardActiveTab = 'pending';
+let inwardMasterData = [];
+let inwardRecentEntries = [];
+let inwardSuggestions = { vendors: [], locations: [] };
+let inwardLoaded = false;
 
-  let outwardRequests = [];
-  let outwardActiveTab = 'pending';
+function login() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  document.getElementById('loginError').style.display = 'none';
+  google.script.run
+    .withSuccessHandler(function(response) {
+      if (!response.success) {
+        showLoginError(response.message);
+        return;
+      }
+      loggedUserName = response.name || 'Store Admin';
+      setText('loggedUser', loggedUserName);
+      document.getElementById('loginPage').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      showModule('outward');
+      startErpAutoRefresh();
+    })
+    .withFailureHandler(function(error) {
+      showLoginError(error.message);
+    })
+    .checkLogin(username, password);
+}
 
-  let inwardMasterData = [];
-  let inwardRecentEntries = [];
-  let inwardSuggestions = { vendors: [], locations: [] };
-  let inwardLoaded = false;
+function showLoginError(message) {
+  const box = document.getElementById('loginError');
+  box.innerText = message || 'Login failed';
+  box.style.display = 'block';
+}
 
-  function login() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+function logout() {
+  stopErpAutoRefresh();
+  showLoading(false);
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginPage').style.display = 'flex';
+  document.getElementById('username').value = '';
+  document.getElementById('password').value = '';
+  closeReportsMenuOnly();
+}
 
-    document.getElementById('loginError').style.display = 'none';
+function hideAllModules() {
+  /* material module ko Client_Material.html patch karta hai automatically */
+  ['outwardModule', 'inwardModule', 'inventoryModule', 'reportsModule', 'materialModule'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
 
-    google.script.run
-      .withSuccessHandler(function(response) {
-        if (!response.success) {
-          showLoginError(response.message);
-          return;
-        }
+function clearMainMenuActive() {
+  ['menuOutward', 'menuInward', 'menuInventory', 'menuReports', 'menuMaterial'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+}
 
-        loggedUserName = response.name || 'Store Admin';
-        setText('loggedUser', loggedUserName);
+function showModule(moduleName) {
+  showLoading(false);
+  hideAllModules();
+  clearMainMenuActive();
 
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('app').style.display = 'block';
-
-        showModule('outward');
-        startErpAutoRefresh();
-      })
-      .withFailureHandler(function(error) {
-        showLoginError(error.message);
-      })
-      .checkLogin(username, password);
-  }
-
-  function showLoginError(message) {
-    const box = document.getElementById('loginError');
-    box.innerText = message || 'Login failed';
-    box.style.display = 'block';
-  }
-
-  function logout() {
-    stopErpAutoRefresh();
-    showLoading(false);
-    document.getElementById('app').style.display = 'none';
-    document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('username').value = '';
-    document.getElementById('password').value = '';
+  if (moduleName !== 'reports') {
     closeReportsMenuOnly();
+    clearReportSubmenuActive();
   }
 
-  function hideAllModules() {
-    /* material module ko Client_Material.html patch karta hai automatically */
-    ['outwardModule', 'inwardModule', 'inventoryModule', 'reportsModule', 'materialModule'].forEach(function(id) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
+  if (moduleName === 'inward') {
+    const inwardModule = document.getElementById('inwardModule');
+    if (inwardModule) inwardModule.style.display = 'block';
+    const menuInward = document.getElementById('menuInward');
+    if (menuInward) menuInward.classList.add('active');
+    setText('pageTitle', 'Inward');
+    setText('pageSubtitle', 'Material inward entry and recent records');
+    setTodayDate('inDate');
+    if (typeof loadInwardData === 'function') {
+      loadInwardData();
+    }
+    return;
+  }
+
+  if (moduleName === 'inventory') {
+    const inventoryModule = document.getElementById('inventoryModule');
+    if (inventoryModule) inventoryModule.style.display = 'block';
+    const menuInventory = document.getElementById('menuInventory');
+    if (menuInventory) menuInventory.classList.add('active');
+    setText('pageTitle', 'Inventory');
+    setText('pageSubtitle', 'Monthly stock summary, opening balance, movement, closing stock and reorder level');
+    if (typeof setDefaultInventoryPeriod === 'function') {
+      setDefaultInventoryPeriod(true);
+    }
+    if (typeof loadInventoryData === 'function') {
+      loadInventoryData();
+    }
+    return;
+  }
+
+  /* material module — Client_Material.html showMaterialModule() handle karta hai.
+     Yahan bhi hook rakh rahe hain for direct calls */
+  if (moduleName === 'material') {
+    if (typeof showMaterialModule === 'function') {
+      showMaterialModule();
+    } else {
+      /* Fallback agar Client_Material.html load nahi hua */
+      const materialModule = document.getElementById('materialModule');
+      if (materialModule) materialModule.style.display = 'block';
+      const menuMaterial = document.getElementById('menuMaterial');
+      if (menuMaterial) menuMaterial.classList.add('active');
+      setText('pageTitle', 'Material List');
+      setText('pageSubtitle', 'Master material list — add, update and delete items');
+      if (typeof loadMaterialData === 'function') loadMaterialData();
+    }
+    return;
+  }
+
+  if (moduleName === 'reports') {
+    if (typeof showReportsModule === 'function') {
+      showReportsModule(activeReportType || 'dashboard');
+    }
+    return;
+  }
+
+  /* Default: Outward */
+  const outwardModule = document.getElementById('outwardModule');
+  if (outwardModule) outwardModule.style.display = 'block';
+  const menuOutward = document.getElementById('menuOutward');
+  if (menuOutward) menuOutward.classList.add('active');
+  setText('pageTitle', 'Outward');
+  setText('pageSubtitle', 'Material issue request tracking');
+  if (typeof loadOutwardData === 'function') {
+    loadOutwardData();
+  }
+}
+
+function showLoading(show) {
+  if (show) {
+    Swal.fire({
+      toast: true,
+      position: 'bottom-end',
+      icon: 'info',
+      title: 'Loading data from Server...',
+      showConfirmButton: false,
+      timer: 3000,
+      timerProgressBar: true,
+      allowOutsideClick: false,
+      allowEscapeKey: false
     });
+  } else {
+    Swal.close();
   }
+}
 
-  function clearMainMenuActive() {
-    ['menuOutward', 'menuInward', 'menuInventory', 'menuReports', 'menuMaterial'].forEach(function(id) {
-      const el = document.getElementById(id);
-      if (el) el.classList.remove('active');
-    });
+function startErpAutoRefresh() {
+  stopErpAutoRefresh();
+  erpAutoRefreshTimer = setInterval(refreshActiveModuleData, ERP_AUTO_REFRESH_MS);
+}
+
+function stopErpAutoRefresh() {
+  if (erpAutoRefreshTimer) {
+    clearInterval(erpAutoRefreshTimer);
+    erpAutoRefreshTimer = null;
   }
+  erpAutoRefreshRunning = false;
+}
 
-  function showModule(moduleName) {
-    showLoading(false);
-    hideAllModules();
-    clearMainMenuActive();
+function refreshActiveModuleData() {
+  if (erpAutoRefreshRunning) return;
+  if (isAnyModalOpen()) return;
+  if (isInventoryLocationEditorActive()) return;
 
-    if (moduleName !== 'reports') {
-      closeReportsMenuOnly();
-      clearReportSubmenuActive();
-    }
+  const activeModule = getActiveModuleName();
+  if (!activeModule) return;
 
-    if (moduleName === 'inward') {
-      const inwardModule = document.getElementById('inwardModule');
-      if (inwardModule) inwardModule.style.display = 'block';
-
-      const menuInward = document.getElementById('menuInward');
-      if (menuInward) menuInward.classList.add('active');
-
-      setText('pageTitle', 'Inward');
-      setText('pageSubtitle', 'Material inward entry and recent records');
-      setTodayDate('inDate');
-
-      if (typeof loadInwardData === 'function') {
-        loadInwardData();
-      }
-      return;
-    }
-
-    if (moduleName === 'inventory') {
-      const inventoryModule = document.getElementById('inventoryModule');
-      if (inventoryModule) inventoryModule.style.display = 'block';
-
-      const menuInventory = document.getElementById('menuInventory');
-      if (menuInventory) menuInventory.classList.add('active');
-
-      setText('pageTitle', 'Inventory');
-      setText('pageSubtitle', 'Monthly stock summary, opening balance, movement, closing stock and reorder level');
-
-      if (typeof setDefaultInventoryPeriod === 'function') {
-        setDefaultInventoryPeriod(true);
-      }
-      if (typeof loadInventoryData === 'function') {
-        loadInventoryData();
-      }
-      return;
-    }
-
-    /* material module — Client_Material.html showMaterialModule() handle karta hai.
-       Yahan bhi hook rakh rahe hain for direct calls */
-    if (moduleName === 'material') {
-      if (typeof showMaterialModule === 'function') {
-        showMaterialModule();
-      } else {
-        /* Fallback agar Client_Material.html load nahi hua */
-        const materialModule = document.getElementById('materialModule');
-        if (materialModule) materialModule.style.display = 'block';
-        const menuMaterial = document.getElementById('menuMaterial');
-        if (menuMaterial) menuMaterial.classList.add('active');
-        setText('pageTitle', 'Material List');
-        setText('pageSubtitle', 'Master material list — add, update and delete items');
-        if (typeof loadMaterialData === 'function') loadMaterialData();
-      }
-      return;
-    }
-
-    if (moduleName === 'reports') {
-      if (typeof showReportsModule === 'function') {
-        showReportsModule(activeReportType || 'dashboard');
-      }
-      return;
-    }
-
-    /* Default: Outward */
-    const outwardModule = document.getElementById('outwardModule');
-    if (outwardModule) outwardModule.style.display = 'block';
-
-    const menuOutward = document.getElementById('menuOutward');
-    if (menuOutward) menuOutward.classList.add('active');
-
-    setText('pageTitle', 'Outward');
-    setText('pageSubtitle', 'Material issue request tracking');
-
-    if (typeof loadOutwardData === 'function') {
-      loadOutwardData();
-    }
-  }
-
-  function showLoading(show) {
-    const box = document.getElementById('loadingBox');
-    if (!box) return;
-    box.style.display = show ? 'block' : 'none';
-  }
-
-  function startErpAutoRefresh() {
-    stopErpAutoRefresh();
-    erpAutoRefreshTimer = setInterval(refreshActiveModuleData, ERP_AUTO_REFRESH_MS);
-  }
-
-  function stopErpAutoRefresh() {
-    if (erpAutoRefreshTimer) {
-      clearInterval(erpAutoRefreshTimer);
-      erpAutoRefreshTimer = null;
-    }
+  erpAutoRefreshRunning = true;
+  const done = function() {
     erpAutoRefreshRunning = false;
+  };
+
+  if (activeModule === 'outward' && typeof loadOutwardData === 'function') {
+    loadOutwardData({ silent: true, onComplete: done });
+    return;
   }
-
-  function refreshActiveModuleData() {
-    if (erpAutoRefreshRunning) return;
-    if (isAnyModalOpen()) return;
-    if (isInventoryLocationEditorActive()) return;
-
-    const activeModule = getActiveModuleName();
-    if (!activeModule) return;
-
-    erpAutoRefreshRunning = true;
-    const done = function() {
-      erpAutoRefreshRunning = false;
-    };
-
-    if (activeModule === 'outward' && typeof loadOutwardData === 'function') {
-      loadOutwardData({ silent: true, onComplete: done });
-      return;
-    }
-
-    if (activeModule === 'inward' && typeof loadInwardData === 'function') {
-      loadInwardData({ silent: true, onComplete: done });
-      return;
-    }
-
-    if (activeModule === 'inventory' && typeof loadInventoryData === 'function') {
-      loadInventoryData({ silent: true, onComplete: done, keepScroll: true });
-      return;
-    }
-
-    if (activeModule === 'material' && typeof loadMaterialData === 'function') {
-      loadMaterialData({ silent: true, onComplete: done });
-      return;
-    }
-
-    if (activeModule === 'reports' && typeof refreshActiveReport === 'function') {
-      refreshActiveReport({ silent: true, onComplete: done });
-      return;
-    }
-
-    done();
+  if (activeModule === 'inward' && typeof loadInwardData === 'function') {
+    loadInwardData({ silent: true, onComplete: done });
+    return;
   }
-
-  function getActiveModuleName() {
-    /* 'material' bhi include kiya gaya hai — pehle nahi tha, woh bug tha */
-    const modules = ['outward', 'inward', 'inventory', 'material', 'reports'];
-    for (let i = 0; i < modules.length; i++) {
-      const section = document.getElementById(modules[i] + 'Module');
-      if (section && section.style.display !== 'none') return modules[i];
-    }
-    return '';
+  if (activeModule === 'inventory' && typeof loadInventoryData === 'function') {
+    loadInventoryData({ silent: true, onComplete: done, keepScroll: true });
+    return;
   }
-
-  function isAnyModalOpen() {
-    const modals = document.querySelectorAll('.modal-bg');
-    for (let i = 0; i < modals.length; i++) {
-      if (modals[i].style.display && modals[i].style.display !== 'none') return true;
-    }
-    return false;
+  if (activeModule === 'material' && typeof loadMaterialData === 'function') {
+    loadMaterialData({ silent: true, onComplete: done });
+    return;
   }
-
-  function isInventoryLocationEditorActive() {
-    const active = document.activeElement;
-    return !!(active && active.id && active.id.indexOf('invLocation_') === 0);
+  if (activeModule === 'reports' && typeof refreshActiveReport === 'function') {
+    refreshActiveReport({ silent: true, onComplete: done });
+    return;
   }
+  done();
+}
 
-  function clearReportSubmenuActive() {
-    const ids = [
-      'reportSubDashboard',
-      'reportSubStockSummary',
-      'reportSubReorder',
-      'reportSubItemLedger',
-      'reportSubInwardRegister',
-      'reportSubOutwardRegister',
-      'reportSubAssetSerial',
-      'reportSubException'
-    ];
-    ids.forEach(function(id) {
-      const el = document.getElementById(id);
-      if (el) el.classList.remove('active');
-    });
+function getActiveModuleName() {
+  /* 'material' bhi include kiya gaya hai — pehle nahi tha, woh bug tha */
+  const modules = ['outward', 'inward', 'inventory', 'material', 'reports'];
+  for (let i = 0; i < modules.length; i++) {
+    const section = document.getElementById(modules[i] + 'Module');
+    if (section && section.style.display !== 'none') return modules[i];
   }
+  return '';
+}
 
-  function closeReportsMenuOnly() {
-    const submenu = document.getElementById('reportsSubmenu');
-    const arrow = document.getElementById('reportsMenuArrow');
-    if (submenu) submenu.classList.remove('open');
-    if (arrow) arrow.innerText = '⌄';
+function isAnyModalOpen() {
+  const modals = document.querySelectorAll('.modal-bg');
+  for (let i = 0; i < modals.length; i++) {
+    if (modals[i].style.display && modals[i].style.display !== 'none') return true;
   }
+  return false;
+}
 
-  function fillDatalist(id, values) {
-    const list = document.getElementById(id);
-    if (!list) return;
-    list.innerHTML = '';
-    values.forEach(function(value) {
-      if (!value) return;
-      const option = document.createElement('option');
-      option.value = value;
-      list.appendChild(option);
-    });
-  }
+function isInventoryLocationEditorActive() {
+  const active = document.activeElement;
+  return !!(active && active.id && active.id.indexOf('invLocation_') === 0);
+}
 
-  function unique(arr) {
-    return [...new Set(
-      arr
-        .filter(function(v) { return String(v || '').trim() !== ''; })
-        .map(function(v) { return String(v).trim(); })
-    )].sort();
-  }
-
-  function norm(value) {
-    return String(value || '').trim().toLowerCase();
-  }
-
-  function getValue(id) {
+function clearReportSubmenuActive() {
+  const ids = [
+    'reportSubDashboard',
+    'reportSubStockSummary',
+    'reportSubReorder',
+    'reportSubItemLedger',
+    'reportSubInwardRegister',
+    'reportSubOutwardRegister',
+    'reportSubAssetSerial',
+    'reportSubException'
+  ];
+  ids.forEach(function(id) {
     const el = document.getElementById(id);
-    return el ? String(el.value || '').trim() : '';
-  }
-
-  function setValue(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.value = value || '';
-  }
-
-  function setText(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.innerText = value === null || value === undefined ? '' : value;
-  }
-
-  function esc(value) {
-    if (value === null || value === undefined) return '';
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  function setTodayDate(id) {
-    const input = document.getElementById(id);
-    if (!input || input.value) return;
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    input.value = yyyy + '-' + mm + '-' + dd;
-  }
-
-  function toInputDate(displayDate) {
-    if (!displayDate) return '';
-    const value = String(displayDate).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-    let parts = value.split('/');
-    if (parts.length !== 3) parts = value.split('-');
-    if (parts.length !== 3) return '';
-    return parts[2] + '-' + parts[1] + '-' + parts[0];
-  }
-
-  document.addEventListener('keydown', function(event) {
-    const loginPage = document.getElementById('loginPage');
-    if (event.key === 'Enter' && loginPage && loginPage.style.display !== 'none') {
-      login();
-    }
+    if (el) el.classList.remove('active');
   });
+}
 
-  /* ========================
-     MOBILE SIDEBAR TOGGLE
-     Bootstrap responsive ke liye
-  ======================== */
-  function toggleMobileSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    if (!sidebar) return;
-    sidebar.classList.toggle('sidebar-open');
-    const overlay = document.getElementById('sidebarOverlay');
-    if (overlay) overlay.style.display = sidebar.classList.contains('sidebar-open') ? 'block' : 'none';
-  }
+function closeReportsMenuOnly() {
+  const submenu = document.getElementById('reportsSubmenu');
+  const arrow = document.getElementById('reportsMenuArrow');
+  if (submenu) submenu.classList.remove('open');
+  if (arrow) arrow.innerText = '⌄';
+}
 
-  function closeMobileSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) sidebar.classList.remove('sidebar-open');
-    const overlay = document.getElementById('sidebarOverlay');
-    if (overlay) overlay.style.display = 'none';
-  }
-
-  /* Close sidebar when a menu item is clicked on mobile */
-  document.addEventListener('click', function(e) {
-    const item = e.target.closest('.menu-item, .submenu-item');
-    if (item && window.innerWidth <= 768) {
-      closeMobileSidebar();
-    }
+function fillDatalist(id, values) {
+  const list = document.getElementById(id);
+  if (!list) return;
+  list.innerHTML = '';
+  values.forEach(function(value) {
+    if (!value) return;
+    const option = document.createElement('option');
+    option.value = value;
+    list.appendChild(option);
   });
+}
 
+function unique(arr) {
+  return [...new Set(
+    arr
+      .filter(function(v) { return String(v || '').trim() !== ''; })
+      .map(function(v) { return String(v).trim(); })
+  )].sort();
+}
+
+function norm(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getValue(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value || '').trim() : '';
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value || '';
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.innerText = value === null || value === undefined ? '' : value;
+}
+
+function esc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function setTodayDate(id) {
+  const input = document.getElementById(id);
+  if (!input || input.value) return;
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  input.value = yyyy + '-' + mm + '-' + dd;
+}
+
+function toInputDate(displayDate) {
+  if (!displayDate) return '';
+  const value = String(displayDate).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  let parts = value.split('/');
+  if (parts.length !== 3) parts = value.split('-');
+  if (parts.length !== 3) return '';
+  return parts[2] + '-' + parts[1] + '-' + parts[0];
+}
+
+document.addEventListener('keydown', function(event) {
+  const loginPage = document.getElementById('loginPage');
+  if (event.key === 'Enter' && loginPage && loginPage.style.display !== 'none') {
+    login();
+  }
+});
+
+/* ========================
+   MOBILE SIDEBAR TOGGLE
+   Bootstrap responsive ke liye
+   ======================== */
+function toggleMobileSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('sidebar-open');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (overlay) overlay.style.display = sidebar.classList.contains('sidebar-open') ? 'block' : 'none';
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.classList.remove('sidebar-open');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+/* Close sidebar when a menu item is clicked on mobile */
+document.addEventListener('click', function(e) {
+  const item = e.target.closest('.menu-item, .submenu-item');
+  if (item && window.innerWidth <= 768) {
+    closeMobileSidebar();
+  }
+});
 </script>
