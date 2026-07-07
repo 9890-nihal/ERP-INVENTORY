@@ -138,59 +138,84 @@ function updateOutwardManualStatus(payload) {
     masterData: getOutwardMaterialRows_()
   };
 }
-
 function updateOutwardGroupIssue(payload) {
   payload = payload || {};
   if (!payload.items || !payload.items.length) throw new Error('No transaction items received');
 
- const lock = LockService.getScriptLock();
-lock.waitLock(5000); // 5 seconds max
+  var lock = LockService.getScriptLock();
+  
+  // ✅ Timeout badhao - 30 seconds tak wait karo
+  try {
+    lock.waitLock(30000); // 30 seconds max
+  } catch(e) {
+    throw new Error('Another update is in progress. Please wait a moment and try again.');
+  }
 
   try {
-    const sheet = getOutwardSheet_();
+    var sheet = getOutwardSheet_();
     ensureOutwardStatusHeader_(sheet);
 
-    const headers = getOutwardHeaders_(sheet);
-    const lastCol = sheet.getLastColumn();
+    var headers = getOutwardHeaders_(sheet);
+    var lastCol = sheet.getLastColumn();
 
-    const deleteRows = [];
-    const updateItems = [];
+    var deleteRows = [];
+    var updateItems = [];
 
+    // Separate delete and update items
     payload.items.forEach(function(item) {
-      const rowNumber = Number(item.rowNumber);
+      var rowNumber = Number(item.rowNumber);
       if (!rowNumber || rowNumber < 2) return;
 
-      if (item.deleteRow === true || String(item.deleteRow).toUpperCase() === 'YES' || String(item.deleteRow).toUpperCase() === 'TRUE') {
+      if (item.deleteRow === true || 
+          String(item.deleteRow).toUpperCase() === 'YES' || 
+          String(item.deleteRow).toUpperCase() === 'TRUE') {
         deleteRows.push(rowNumber);
       } else {
         updateItems.push(item);
       }
     });
 
-    updateItems.forEach(function(item) {
-      const rowNumber = Number(item.rowNumber);
-      if (!rowNumber || rowNumber < 2 || rowNumber > sheet.getLastRow()) return;
+    // First: Delete rows (bottom to top to maintain row numbers)
+    if (deleteRows.length > 0) {
+      // Sort descending to delete from bottom
+      var uniqueDeleteRows = deleteRows
+        .filter(function(rowNumber, index, arr) { 
+          return arr.indexOf(rowNumber) === index; 
+        })
+        .sort(function(a, b) { 
+          return b - a; 
+        });
 
-      const rowRange = sheet.getRange(rowNumber, 1, 1, lastCol);
-      const rowData = rowRange.getValues()[0];
-
-      updateOutwardRowData_(headers, rowData, item);
-
-      rowRange.setValues([rowData]);
-    });
-
-    deleteRows
-      .filter(function(rowNumber, index, arr) { return arr.indexOf(rowNumber) === index; })
-      .sort(function(a, b) { return b - a; })
-      .forEach(function(rowNumber) {
+      uniqueDeleteRows.forEach(function(rowNumber) {
         if (rowNumber >= 2 && rowNumber <= sheet.getLastRow()) {
           sheet.deleteRow(rowNumber);
         }
       });
+      
+      // Re-read headers after deletion (columns might shift)
+      headers = getOutwardHeaders_(sheet);
+      lastCol = sheet.getLastColumn();
+    }
+
+    // Then: Update remaining items
+    updateItems.forEach(function(item) {
+      var rowNumber = Number(item.rowNumber);
+      if (!rowNumber || rowNumber < 2 || rowNumber > sheet.getLastRow()) return;
+
+      var rowRange = sheet.getRange(rowNumber, 1, 1, lastCol);
+      var rowData = rowRange.getValues()[0];
+
+      updateOutwardRowData_(headers, rowData, item);
+
+      rowRange.setValues([rowData]);
+      
+      // ✅ Small delay between updates to prevent locking
+      SpreadsheetApp.flush();
+    });
 
     SpreadsheetApp.flush();
 
-    const deletedMsg = deleteRows.length ? ' Deleted: ' + deleteRows.length + ' item(s).' : '';
+    var deletedMsg = deleteRows.length ? ' Deleted: ' + deleteRows.length + ' item(s).' : '';
 
     return {
       success: true,
@@ -198,8 +223,16 @@ lock.waitLock(5000); // 5 seconds max
       requests: getOutwardRequests_(),
       masterData: getOutwardMaterialRows_()
     };
+    
+  } catch(error) {
+    throw new Error('Update failed: ' + (error.message || error.toString()));
   } finally {
-    lock.releaseLock();
+    // ✅ Always release lock
+    try {
+      lock.releaseLock();
+    } catch(e) {
+      Logger.log('Error releasing lock: ' + e);
+    }
   }
 }
 
