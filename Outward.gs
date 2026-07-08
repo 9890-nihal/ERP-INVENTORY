@@ -82,6 +82,88 @@ function getOutwardMaterialRows_() {
   return rows;
 }
 
+function generateOutwardTransactionId_(sheet, headPerson) {
+  const headers = getOutwardHeaders_(sheet);
+  const idCol = findOutwardHeaderIndex_(headers, ['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID']);
+  let maxNum = 0;
+
+  if (idCol !== -1 && sheet.getLastRow() > 1) {
+    const values = sheet.getRange(2, idCol + 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+    values.forEach(function(row) {
+      const match = String(row[0] || '').match(/_Request_(\d+)\s*$/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    });
+  }
+
+  const namePart = outwardClean_(headPerson).split(/\s+/)[0] || 'Store';
+  return namePart + '_Request_' + (maxNum + 1);
+}
+
+function createOutwardTransaction(payload) {
+  payload = payload || {};
+
+  const headPerson = outwardClean_(payload.headPerson);
+  const location = outwardClean_(payload.location);
+  const purpose = outwardClean_(payload.purpose);
+  const technician = outwardClean_(payload.technician);
+  const items = Array.isArray(payload.items) ? payload.items : [];
+
+  if (!headPerson) throw new Error('Head Person is required');
+  if (!location) throw new Error('Location is required');
+  if (!purpose) throw new Error('Purpose is required');
+  if (!items.length) throw new Error('Kam se kam ek item add karo');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  try {
+    const sheet = getOutwardSheet_();
+    ensureOutwardStatusHeader_(sheet);
+    const headers = getOutwardHeaders_(sheet);
+    const lastCol = sheet.getLastColumn();
+
+    const transactionId = generateOutwardTransactionId_(sheet, headPerson);
+    const timeZone = Session.getScriptTimeZone() || 'Asia/Kolkata';
+    const displayDate = Utilities.formatDate(new Date(), timeZone, 'dd/MM/yyyy');
+
+    function updateHeaderCol(rowData, headerNames, val) {
+      const idx = findOutwardHeaderIndex_(headers, headerNames);
+      if (idx !== -1) rowData[idx] = val;
+    }
+
+    const newRows = items.map(function(item) {
+      const rowData = new Array(lastCol).fill('');
+
+      updateHeaderCol(rowData, ['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID'], transactionId);
+      updateHeaderCol(rowData, ['Type', 'TYPE'], 'REQUESTED');
+      updateHeaderCol(rowData, ['Date', 'DATE'], displayDate);
+      updateHeaderCol(rowData, ['Location', 'LOCATION'], location);
+      updateHeaderCol(rowData, ['Purpose', 'PURPOSE'], purpose);
+      updateHeaderCol(rowData, ['Head_Person', 'Head Person', 'HEAD_PERSON'], headPerson);
+      updateHeaderCol(rowData, ['Technician', 'TECHNICIAN'], technician);
+
+      updateOutwardRowData_(headers, rowData, item);
+      return rowData;
+    });
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, lastCol).setValues(newRows);
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      message: 'New transaction created: ' + transactionId,
+      transactionId: transactionId,
+      requests: getOutwardRequests_(),
+      masterData: getOutwardMaterialRows_()
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function updateOutwardIssue(payload) {
   payload = payload || {};
 
