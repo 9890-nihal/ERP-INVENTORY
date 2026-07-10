@@ -220,101 +220,164 @@ function updateOutwardManualStatus(payload) {
     masterData: getOutwardMaterialRows_()
   };
 }
+
+function deleteOutwardTransaction(transactionId) {
+  const rawId = outwardClean_(transactionId);
+  const txnId = rawId.split('|')[0];
+  if (!txnId) throw new Error('Transaction ID required');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+
+  try {
+    const sheet = getOutwardSheet_();
+    const headers = getOutwardHeaders_(sheet);
+    const idCol = findOutwardHeaderIndex_(headers, ['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID']);
+    if (idCol === -1) throw new Error('Transaction_ID column not found');
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) throw new Error('No data found');
+
+    const values = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getDisplayValues();
+    const rowsToDelete = [];
+    values.forEach(function(row, i) {
+      if (String(row[0] || '').trim() === txnId) {
+        rowsToDelete.push(i + 2);
+      }
+    });
+
+    if (!rowsToDelete.length) throw new Error('Transaction not found: ' + txnId);
+
+    rowsToDelete
+      .sort(function(a, b) { return b - a; })
+      .forEach(function(rowNumber) {
+        sheet.deleteRow(rowNumber);
+      });
+
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      message: 'Transaction deleted: ' + txnId + ' (' + rowsToDelete.length + ' item(s))',
+      requests: getOutwardRequests_(),
+      masterData: getOutwardMaterialRows_()
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function updateOutwardGroupIssue(payload) {
   payload = payload || {};
   if (!payload.items || !payload.items.length) throw new Error('No transaction items received');
 
-  var lock = LockService.getScriptLock();
-  
-  // ✅ Timeout badhao - 30 seconds tak wait karo
-  try {
-    lock.waitLock(30000); // 30 seconds max
-  } catch(e) {
-    throw new Error('Another update is in progress. Please wait a moment and try again.');
-  }
+ const lock = LockService.getScriptLock();
+lock.waitLock(5000); // 5 seconds max
 
   try {
-    var sheet = getOutwardSheet_();
+    const sheet = getOutwardSheet_();
     ensureOutwardStatusHeader_(sheet);
 
-    var headers = getOutwardHeaders_(sheet);
-    var lastCol = sheet.getLastColumn();
+    const headers = getOutwardHeaders_(sheet);
+    const lastCol = sheet.getLastColumn();
 
-    var deleteRows = [];
-    var updateItems = [];
+    const deleteRows = [];
+    const updateItems = [];
+    const newItems = [];
 
-    // Separate delete and update items
     payload.items.forEach(function(item) {
-      var rowNumber = Number(item.rowNumber);
-      if (!rowNumber || rowNumber < 2) return;
+      const rowNumber = Number(item.rowNumber);
 
-      if (item.deleteRow === true || 
-          String(item.deleteRow).toUpperCase() === 'YES' || 
-          String(item.deleteRow).toUpperCase() === 'TRUE') {
+      if (!rowNumber || rowNumber < 2) {
+        newItems.push(item);
+        return;
+      }
+
+      if (item.deleteRow === true || String(item.deleteRow).toUpperCase() === 'YES' || String(item.deleteRow).toUpperCase() === 'TRUE') {
         deleteRows.push(rowNumber);
       } else {
         updateItems.push(item);
       }
     });
 
-    // First: Delete rows (bottom to top to maintain row numbers)
-    if (deleteRows.length > 0) {
-      // Sort descending to delete from bottom
-      var uniqueDeleteRows = deleteRows
-        .filter(function(rowNumber, index, arr) { 
-          return arr.indexOf(rowNumber) === index; 
-        })
-        .sort(function(a, b) { 
-          return b - a; 
-        });
-
-      uniqueDeleteRows.forEach(function(rowNumber) {
-        if (rowNumber >= 2 && rowNumber <= sheet.getLastRow()) {
-          sheet.deleteRow(rowNumber);
-        }
-      });
-      
-      // Re-read headers after deletion (columns might shift)
-      headers = getOutwardHeaders_(sheet);
-      lastCol = sheet.getLastColumn();
-    }
-
-    // Then: Update remaining items
     updateItems.forEach(function(item) {
-      var rowNumber = Number(item.rowNumber);
+      const rowNumber = Number(item.rowNumber);
       if (!rowNumber || rowNumber < 2 || rowNumber > sheet.getLastRow()) return;
 
-      var rowRange = sheet.getRange(rowNumber, 1, 1, lastCol);
-      var rowData = rowRange.getValues()[0];
+      const rowRange = sheet.getRange(rowNumber, 1, 1, lastCol);
+      const rowData = rowRange.getValues()[0];
 
       updateOutwardRowData_(headers, rowData, item);
 
       rowRange.setValues([rowData]);
-      
-      // ✅ Small delay between updates to prevent locking
-      SpreadsheetApp.flush();
     });
+
+    if (newItems.length) {
+      const idCol = findOutwardHeaderIndex_(headers, ['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID']);
+      let headerFields = null;
+      const txnId = outwardClean_(payload.transactionId).split('|')[0];
+
+      if (idCol !== -1 && sheet.getLastRow() > 1) {
+        const allValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+        for (let i = 0; i < allValues.length; i++) {
+          if (String(allValues[i][idCol] || '').trim() === txnId) {
+            headerFields = allValues[i];
+            break;
+          }
+        }
+      }
+
+      function getHeaderVal(headerNames) {
+        if (!headerFields) return '';
+        const idx = findOutwardHeaderIndex_(headers, headerNames);
+        return idx !== -1 ? headerFields[idx] : '';
+      }
+
+      const newRows = newItems.map(function(item) {
+        const rowData = new Array(lastCol).fill('');
+
+        function setCol(headerNames, val) {
+          const idx = findOutwardHeaderIndex_(headers, headerNames);
+          if (idx !== -1) rowData[idx] = val;
+        }
+
+        setCol(['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID'], txnId || getHeaderVal(['Transaction_ID', 'Transaction ID', 'TRANSACTION_ID']));
+        setCol(['Type', 'TYPE'], getHeaderVal(['Type', 'TYPE']) || 'REQUESTED');
+        setCol(['Date', 'DATE'], getHeaderVal(['Date', 'DATE']));
+        setCol(['Location', 'LOCATION'], getHeaderVal(['Location', 'LOCATION']));
+        setCol(['Purpose', 'PURPOSE'], getHeaderVal(['Purpose', 'PURPOSE']));
+        setCol(['Head_Person', 'Head Person', 'HEAD_PERSON'], getHeaderVal(['Head_Person', 'Head Person', 'HEAD_PERSON']));
+        setCol(['Technician', 'TECHNICIAN'], getHeaderVal(['Technician', 'TECHNICIAN']));
+
+        updateOutwardRowData_(headers, rowData, item);
+        return rowData;
+      });
+
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, lastCol).setValues(newRows);
+    }
+
+    deleteRows
+      .filter(function(rowNumber, index, arr) { return arr.indexOf(rowNumber) === index; })
+      .sort(function(a, b) { return b - a; })
+      .forEach(function(rowNumber) {
+        if (rowNumber >= 2 && rowNumber <= sheet.getLastRow()) {
+          sheet.deleteRow(rowNumber);
+        }
+      });
 
     SpreadsheetApp.flush();
 
-    var deletedMsg = deleteRows.length ? ' Deleted: ' + deleteRows.length + ' item(s).' : '';
+    const addedMsg = newItems.length ? ' Added: ' + newItems.length + ' new item(s).' : '';
+    const deletedMsg = deleteRows.length ? ' Deleted: ' + deleteRows.length + ' item(s).' : '';
 
     return {
       success: true,
-      message: 'Transaction items updated successfully.' + deletedMsg,
+      message: 'Transaction items updated successfully.' + addedMsg + deletedMsg,
       requests: getOutwardRequests_(),
       masterData: getOutwardMaterialRows_()
     };
-    
-  } catch(error) {
-    throw new Error('Update failed: ' + (error.message || error.toString()));
   } finally {
-    // ✅ Always release lock
-    try {
-      lock.releaseLock();
-    } catch(e) {
-      Logger.log('Error releasing lock: ' + e);
-    }
+    lock.releaseLock();
   }
 }
 

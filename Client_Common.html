@@ -1,6 +1,9 @@
 <script>
 let loggedUserName = 'Store Admin';
 const ERP_AUTO_REFRESH_MS = 10000;
+const ERP_SESSION_KEY = 'erpSession';
+const ERP_SESSION_DURATION_MS = 12 * 60 * 60 * 1000; // 12 hours
+const ERP_LAST_MODULE_KEY = 'erpLastModule';
 let erpAutoRefreshTimer = null;
 let erpAutoRefreshRunning = false;
 let outwardRequests = [];
@@ -9,6 +12,58 @@ let inwardMasterData = [];
 let inwardRecentEntries = [];
 let inwardSuggestions = { vendors: [], locations: [] };
 let inwardLoaded = false;
+
+function saveErpSession(name) {
+  try {
+    localStorage.setItem(ERP_SESSION_KEY, JSON.stringify({
+      name: name,
+      expiresAt: Date.now() + ERP_SESSION_DURATION_MS
+    }));
+  } catch (e) {
+    // localStorage blocked ho sakta hai (private browsing) - session simply persist nahi hoga
+  }
+}
+
+function clearErpSession() {
+  try {
+    localStorage.removeItem(ERP_SESSION_KEY);
+    localStorage.removeItem(ERP_LAST_MODULE_KEY);
+  } catch (e) {}
+}
+
+function getErpSession() {
+  try {
+    const raw = localStorage.getItem(ERP_SESSION_KEY);
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    if (!session || !session.expiresAt || Date.now() > session.expiresAt) {
+      clearErpSession();
+      return null;
+    }
+    return session;
+  } catch (e) {
+    return null;
+  }
+}
+
+function tryRestoreErpSession() {
+  const session = getErpSession();
+  if (!session) return false;
+
+  loggedUserName = session.name || 'Store Admin';
+  setText('loggedUser', loggedUserName);
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  let lastModule = 'outward';
+  try {
+    lastModule = localStorage.getItem(ERP_LAST_MODULE_KEY) || 'outward';
+  } catch (e) {}
+
+  showModule(lastModule);
+  startErpAutoRefresh();
+  return true;
+}
 
 function login() {
   const username = document.getElementById('username').value;
@@ -24,6 +79,7 @@ function login() {
       setText('loggedUser', loggedUserName);
       document.getElementById('loginPage').style.display = 'none';
       document.getElementById('app').style.display = 'block';
+      saveErpSession(loggedUserName);
       showModule('outward');
       startErpAutoRefresh();
     })
@@ -42,6 +98,7 @@ function showLoginError(message) {
 function logout() {
   stopErpAutoRefresh();
   showLoading(false);
+  clearErpSession();
   document.getElementById('app').style.display = 'none';
   document.getElementById('loginPage').style.display = 'flex';
   document.getElementById('username').value = '';
@@ -68,6 +125,8 @@ function showModule(moduleName) {
   showLoading(false);
   hideAllModules();
   clearMainMenuActive();
+
+  try { localStorage.setItem(ERP_LAST_MODULE_KEY, moduleName); } catch (e) {}
 
   if (moduleName !== 'reports') {
     closeReportsMenuOnly();
@@ -150,9 +209,7 @@ function showLoading(show) {
       title: 'Loading data from Server...',
       showConfirmButton: false,
       timer: 3000,
-      timerProgressBar: true,
-      allowOutsideClick: false,
-      allowEscapeKey: false
+      timerProgressBar: true
     });
   } else {
     Swal.close();
@@ -337,15 +394,29 @@ document.addEventListener('keydown', function(event) {
    ======================== */
 function toggleMobileSidebar() {
   const sidebar = document.querySelector('.sidebar');
+  const main = document.querySelector('.main');
   if (!sidebar) return;
-  sidebar.classList.toggle('sidebar-open');
-  const overlay = document.getElementById('sidebarOverlay');
-  if (overlay) overlay.style.display = sidebar.classList.contains('sidebar-open') ? 'block' : 'none';
+
+  if (window.innerWidth <= 768) {
+    // Mobile: drawer-over-content behaviour with dark overlay
+    sidebar.classList.toggle('sidebar-open');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) overlay.style.display = sidebar.classList.contains('sidebar-open') ? 'block' : 'none';
+  } else {
+    // Desktop/tablet: collapse sidebar and expand main content to full width
+    sidebar.classList.toggle('sidebar-collapsed');
+    if (main) main.classList.toggle('sidebar-collapsed-main');
+  }
 }
 
 function closeMobileSidebar() {
   const sidebar = document.querySelector('.sidebar');
-  if (sidebar) sidebar.classList.remove('sidebar-open');
+  const main = document.querySelector('.main');
+  if (sidebar) {
+    sidebar.classList.remove('sidebar-open');
+    sidebar.classList.remove('sidebar-collapsed');
+  }
+  if (main) main.classList.remove('sidebar-collapsed-main');
   const overlay = document.getElementById('sidebarOverlay');
   if (overlay) overlay.style.display = 'none';
 }
@@ -356,5 +427,10 @@ document.addEventListener('click', function(e) {
   if (item && window.innerWidth <= 768) {
     closeMobileSidebar();
   }
+});
+
+/* Refresh par login page par redirect na ho - agar valid session hai to seedha app dikhao */
+window.addEventListener('DOMContentLoaded', function() {
+  tryRestoreErpSession();
 });
 </script>

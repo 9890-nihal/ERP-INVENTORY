@@ -134,6 +134,9 @@
         </div>
 
         <div>
+          <button type="button" class="btn btn-outline out-bell-btn" id="outNotifBell" title="Today's Pending Outward Transactions" onclick="if(typeof toggleOutNotifPanel==='function'){toggleOutNotifPanel();}">
+            &#128276;<span class="out-bell-badge" id="outNotifBadge" style="display:none;">0</span>
+          </button>
           <span class="muted" id="loggedUser">Admin</span>
           <button class="btn btn-danger" onclick="logout()">Logout</button>
         </div>
@@ -148,23 +151,27 @@
         <!-- OUTWARD MODULE -->
         <section id="outwardModule">
 
-          <div class="chip-grid">
-            <div class="chip">
+          <div class="chip-grid outward-chip-grid">
+            <div class="outward-chip outward-chip-teal">
+              <div class="outward-chip-icon">&#128230;</div>
               <span>Total Requests</span>
               <h2 id="outTotalCount">0</h2>
             </div>
 
-            <div class="chip">
+            <div class="outward-chip outward-chip-blue">
+              <div class="outward-chip-icon">&#9203;</div>
               <span>Pending Requests</span>
               <h2 id="outPendingCount">0</h2>
             </div>
 
-            <div class="chip">
+            <div class="outward-chip outward-chip-indigo">
+              <div class="outward-chip-icon">&#9989;</div>
               <span>Success Requests</span>
               <h2 id="outSuccessCount">0</h2>
             </div>
 
-            <div class="chip">
+            <div class="outward-chip outward-chip-purple">
+              <div class="outward-chip-icon">&#128202;</div>
               <span>Total Issue Qty</span>
               <h2 id="outTotalIssueQty">0</h2>
             </div>
@@ -181,6 +188,7 @@
                   <option value="">All Issue From</option>
                   <option value="STORE">STORE</option>
                   <option value="HOUSE">HOUSE</option>
+                  <option value="WAREHOUSE">WAREHOUSE</option>
                 </select>
 
                 <button class="btn btn-primary" onclick="openOutwardAddTransaction()">+ Add Transaction</button>
